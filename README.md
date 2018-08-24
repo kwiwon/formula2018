@@ -12,6 +12,8 @@
 
 _Note: All times are UTC+9_
 
+Schedule: https://wiki.jarvis.trendmicro.com/display/2SC/Schedule
+
 
 ## What
 - [Trend Hearts](https://wiki.jarvis.trendmicro.com/x/y3LXDg)
@@ -43,3 +45,8 @@ The relevant training materials and SDK information can be found in the followin
 
       $ pip install --upgrade pip 
       $ sudo pip install flask-socketio==1.0b1 --user flas
+
+
+## FAQ
+
+https://wiki.jarvis.trendmicro.com/display/2SC/FAQ
