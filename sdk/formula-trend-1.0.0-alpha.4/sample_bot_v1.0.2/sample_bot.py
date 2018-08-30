@@ -415,13 +415,20 @@ class AutoDrive(object):
             ImageProcessor.save_image(self._record_folder, src_img  , prefix = "cam", suffix = suffix)
             ImageProcessor.save_image(self._record_folder, track_img, prefix = "trk", suffix = suffix)
 
+        steering_in_degree = abs(ImageProcessor.rad2deg(steering_angle))
+        if steering_in_degree > 5.0:
+            p_throttle = 0.001
+        else:
+            p_throttle = max(0.01, -0.15 / 0.05 * steering_in_degree + 0.35)
+
         #smooth the control signals
         self._steering_history.append(steering_angle)
         self._steering_history = self._steering_history[-self.MAX_STEERING_HISTORY:]
-        self._throttle_history.append(throttle)
+        self._throttle_history.append(p_throttle)
         self._throttle_history = self._throttle_history[-self.MAX_THROTTLE_HISTORY:]
 
-        self._car.control(sum(self._steering_history)/self.MAX_STEERING_HISTORY, sum(self._throttle_history)/self.MAX_THROTTLE_HISTORY)
+        self._car.control(sum(self._steering_history)/self.MAX_STEERING_HISTORY,
+                          sum(self._throttle_history)/self.MAX_THROTTLE_HISTORY)
 
 
 class Car(object):
