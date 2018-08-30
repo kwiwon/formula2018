@@ -1,63 +1,57 @@
 # coding: utf-8
 
-from keras.models import Sequential
-from keras.layers import Dense
-from keras.layers.convolutional import Convolution2D
-from keras.layers.core import Flatten
-from keras.layers.core import Dropout
-from keras.layers.pooling import MaxPooling2D
-from keras.layers.pooling import AveragePooling2D
-from keras.layers import Cropping2D
-from keras.layers import Lambda
+import os
+import random
+from math import e, sqrt, pi
+
+import numpy as np
+import tensorflow as tf
 from keras.callbacks import ModelCheckpoint
-from tensorflow.python.client import device_lib
+from keras.layers import Cropping2D
+from keras.layers import Dense
+from keras.layers import Lambda
+from keras.layers.convolutional import Convolution2D
+from keras.layers.core import Dropout
+from keras.layers.core import Flatten
+from keras.layers.pooling import AveragePooling2D
+from keras.layers.pooling import MaxPooling2D
+from keras.models import Sequential
+from keras.optimizers import Adam
+from keras.utils import Sequence
 from scipy.misc import imread
 from sklearn.model_selection import train_test_split
 from sklearn.utils import shuffle
-from keras.utils.vis_utils import plot_model as plot
-from math import e, sqrt, pi
 
-import random
-import numpy as np
-import csv
-import os
-import tensorflow as tf
-import re
+# Fix random seed for reproducibility
+seed = 7
+random.seed(seed)
+np.random.seed(seed)
+random_state = 42
 
+# Look for GPU
+# device_name = tf.test.gpu_device_name()
+# if device_name != '/device:GPU:0':
+#     raise SystemError('GPU device not found')
+# print('Found GPU at: {}'.format(device_name))
 
-def has_gpu():
-    local_device_protos = device_lib.list_local_devices()
-    return True if [x.name for x in local_device_protos if x.device_type == 'GPU'] != [] else False
-
-# If has gpu, control GPU Memory
-if has_gpu:
-    gpu_options = tf.GPUOptions(allow_growth=True)
-    sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
-    tf.keras.backend.set_session(sess)
+# Define data folder
+folder = '/content/data'
+img_path = folder + '/IMG/'
+driving_log = folder + '/driving_log.csv'
 
 
-
-
-
-img_path = './data/img/'
-driving_log = './data/driving_log.csv'
-
-def get_img_file_name(path):
-    return os.path.split(path)[-1]
-
+########################
+# Utility functions
+########################
 def gauss(x, mu=0, sigma=0.18):
     """
     utility function to calculate gaussion function
     """
-    a = 1/(sigma*sqrt(2*pi))
-    return a*e**(-0.5*(float(x-mu)/sigma)**2)
+    a = 1 / (sigma * sqrt(2 * pi))
+    return a * e ** (-0.5 * (float(x - mu) / sigma) ** 2)
 
-random_state = 42
-current_dir = os.getcwd()
+
 max_gauss = gauss(0)
-
-images = []
-steerings = []
 
 
 def _should_drop(steering, drop_rate=0.7):
@@ -70,32 +64,36 @@ def _should_drop(steering, drop_rate=0.7):
     steer_drop_rate = drop_rate * gauss(steering) / max_gauss
     return random.random() < steer_drop_rate
 
-# Preprocess:
-# read driving_log.csv and prepare training dataset
-print('Reading data from %s ...' % driving_log)
 
-with open(driving_log, 'r') as f:
-    # there is no header name
-    for row in f.readlines():
-        (center, steering, throttle,
-            brake, speed, time, lap) = row.split(",")
-        steering = float(steering)
-        center = get_img_file_name(center)
-       
-        # randomly skip some data driving strait
-        if _should_drop(steering):
-            continue
-        else:
-            images.append(center)
-            steerings.append(steering)
+def load_data(file_path):
+    print('Reading data from %s ...' % file_path)
+
+    data = []
+
+    def get_img_file_name(path):
+        return os.path.split(path)[-1]
+
+    with open(file_path, 'r') as f:
+        # there is no header name
+        for row in f:
+            (center, steering, throttle,
+             brake, speed, time, lap) = row.strip().split(",")
+
+            # randomly skip some data driving strait
+            steering = float(steering)
+            if _should_drop(steering):
+                continue
+            else:
+                data.append((get_img_file_name(center), steering, throttle,
+                             brake, speed, time, lap))
+
+    # Convert list to 2-D nsarray
+    return np.asarray(data)
 
 
-
-
-
-def prepare_data(img_name, steering, random_flip=False, img_path=img_path):
+def load_img_data(img_name, steering, random_flip=False, img_path=img_path):
     """Load image data (and randomly flip if required)"""
-    img = imread(img_path+img_name).astype(np.float32)
+    img = imread(img_path + img_name).astype(np.float32)
 
     if random_flip and random.random() > 0.5:
         img = np.fliplr(img)
@@ -104,45 +102,21 @@ def prepare_data(img_name, steering, random_flip=False, img_path=img_path):
     return img, steering
 
 
-# generator function for training and validating
-def batches(img_names, steerings, batch_size=128, training=False):
-    """Generator that generates data batch by batch
-    validating: indicates generator is in training mode
-    """
-    # check input data integrity
-    num_imgs = img_names.shape[0]
-    num_steerings = steerings.shape[0]
-    assert num_imgs == num_steerings
-
-    while True:
-        for offset in range(0, num_imgs, batch_size):
-            X_batch = []
-            y_batch = []
-
-            stop = offset + batch_size
-            img_names_b = img_names[offset:stop]
-            steerings_b = steerings[offset:stop]
-
-            for i in range(img_names_b.shape[0]):
-                img, steering = prepare_data(
-                    img_names_b[i], steerings_b[i], random_flip=training)
-                X_batch.append(img)
-                y_batch.append(steering)
-
-            X_batch = np.array(X_batch)
-            y_batch = np.array(y_batch)
-            yield X_batch, y_batch
-
-
 def _normalize(X):
-    a = -0.1
-    b = 0.1
+    a = -1.0
+    b = 1.0
     x_min = 0
     x_max = 255
     return a + (X - x_min) * (b - a) / (x_max - x_min)
 
 
+########################
+# Model / Data Generator
+########################
 def model_builder():
+    # if os.path.exists(folder + '/model.h5'):
+    #     return load_model(folder + '/model.h5')
+
     """
     Define and compile model
     """
@@ -181,78 +155,83 @@ def model_builder():
     model.add(Dropout(0.5))
     model.add(Dense(50, activation='relu'))
     model.add(Dense(10, activation='relu'))
-    model.add(Dense(1))
+    model.add(Dense(2, activation='linear'))
 
-    model.compile('Adam', 'mse', metrics=['mse'])
-    return model 
-
-
-
+    adam = Adam(decay=0.001)
+    model.compile(adam, loss='mse', metrics=['mse'])
+    return model
 
 
-print('Shuffling and Train test split ...')
-images, steerings = shuffle(images, steerings, random_state=random_state)
-paths_train, paths_test, steerings_train, steerings_test = train_test_split(
-    images, steerings, test_size=0.2, random_state=random_state)
+class SequenceData(Sequence):
+    def __init__(self, data, batch_size=128, training=False):
+        self.data = data
+        self.batch_size = batch_size
+        self.training = training
+
+    def __len__(self):
+        return int(np.ceil(len(self.data) / float(self.batch_size)))
+
+    def __getitem__(self, idx):
+        X_batch = []
+        y_batch = []
+
+        start = idx * self.batch_size
+        end = (idx + 1) * self.batch_size
+        batch_data = self.data[start:end]
+
+        for item in batch_data:
+            # item: center, steering, throttle, brake, speed, time, lap
+            # Remember to cast data to numeric value
+            steering = float(item[1])
+            throttle = float(item[2])
+            img, steering = load_img_data(item[0], steering=steering, random_flip=self.training)
+
+            # Input/Output for model
+            X_batch.append(img)
+            y_batch.append((steering, throttle))
+
+        return np.array(X_batch), np.array(y_batch)
 
 
+if __name__ == '__main__':
+    # Preprocess:
+    # read driving_log.csv and prepare training dataset
+    dataset = load_data(driving_log)
 
+    # Split into train and test data (2-D array)
+    print('Shuffling and Train test split ...')
+    dataset = shuffle(dataset, random_state=random_state)
+    data_train, data_test = train_test_split(dataset, test_size=0.2, random_state=random_state)
 
+    print('Validating traing / testing data size ...')
+    print('training set size %d' % len(data_train))
+    print('testing set size %d' % len(data_test))
+    print('Data looks good!')
 
-# check testing data ok
-paths_test = np.array(paths_test)
-steerings_test = np.array(steerings_test)
-assert paths_test.shape[0] == steerings_test.shape[0]
-print('validation set size %d' % steerings_test.shape[0])
+    # Create model
+    print('Creating model...')
+    model = model_builder()
+    # plot(model, to_file='model.png', show_shapes=True, show_layer_names=False)
 
-# check training data ok
-paths_train = np.array(paths_train)
-steerings_train = np.array(steerings_train)
-assert paths_train.shape[0] == steerings_train.shape[0]
-print('training set size %d' % paths_train.shape[0])
+    # Train model
+    batch_size = 32
+    init_epoch = 0
+    nb_epochs = 1
 
+    print('Start training... batch size %d' % batch_size)
+    train_generator = SequenceData(data_train, batch_size=batch_size, training=True)
+    test_generator = SequenceData(data_test, batch_size=batch_size)
+    save_checkpoint = ModelCheckpoint(folder + '/checkpoint.{epoch:02d}.h5', period=100)
 
+    print("Model fitting...")
+    model.fit_generator(
+        train_generator, epochs=nb_epochs, initial_epoch=init_epoch,
+        validation_data=test_generator,
+        callbacks=[save_checkpoint])
+    print('Finished!')
 
-
-
-print('Creating model...')
-
-model = model_builder()
-plot(model, to_file='model.png', show_shapes=True, show_layer_names=False)
-
-# Train model
-print('Validating traing / testing data size ...')
-assert paths_train.shape[0] == steerings_train.shape[0]
-assert paths_test.shape[0] == steerings_test.shape[0]
-print('Data looks good!')
-
-train_size = paths_train.shape[0]
-test_size = paths_test.shape[0]
-batch_size = 128
-nb_epochs = 10
-
-print('Start training... batch size %d' % batch_size)
-train_generator = batches(
-    paths_train, steerings_train, batch_size=batch_size, training=True)
-test_generator = batches(paths_test, steerings_test, batch_size=batch_size)
-
-save_checkpoint = ModelCheckpoint('checkpoint.{epoch:02d}.h5', period=5)
-
-print("Model fitting...")
-model.fit_generator(
-    train_generator, train_size, nb_epochs,
-    validation_data=test_generator,
-    nb_val_samples=test_size,
-    callbacks=[save_checkpoint])
-print('Finished!')
-
-
-
-
-
-# Save trained model
-model_save_name = 'model.h5'
-print('Saving model...')
-model.save(model_save_name)
-print('Model has been save as %s', model_save_name)
-
+    # Save trained model
+    model_save_name = folder + '/model.h5'
+    print('Saving model...')
+    model.save(model_save_name)
+    print('Model has been save as %s' % model_save_name)

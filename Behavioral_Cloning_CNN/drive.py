@@ -3,7 +3,6 @@ import base64
 
 import numpy as np
 import socketio
-import eventlet
 import eventlet.wsgi
 from PIL import Image
 from flask import Flask
@@ -13,13 +12,10 @@ from keras.models import load_model
 
 
 # Fix error with Keras and TensorFlow
-import tensorflow as tf
-tf.python.control_flow_ops = tf
+# import tensorflow as tf
+# tf.python.control_flow_ops = tf
 
 sio = socketio.Server()
-app = Flask(__name__)
-model = None
-prev_image_array = None
 
 
 @sio.on('telemetry')
@@ -35,10 +31,18 @@ def telemetry(sid, data):
     image = Image.open(BytesIO(base64.b64decode(imgString)))
     image_array = np.asarray(image)
     transformed_image_array = image_array[None, :, :, :]
+
     # This model currently assumes that the features of the model are just the images. Feel free to change this.
-    steering_angle = float(model.predict(transformed_image_array, batch_size=1))
-    # The driving model currently just outputs a constant throttle. Feel free to edit this.
-    throttle = max(0.1, -0.15/0.05 * abs(steering_angle) + 0.35)
+    predictions = model.predict(transformed_image_array, batch_size=1)
+    steering_angle = float(predictions[0][0])
+    # throttle = float(predictions[0][1])
+
+    # Use rule-based throttle per steering_angle.
+    if abs(steering_angle) > 5.0:
+        throttle = 0.001
+    else:
+        throttle = max(0.01, -0.15/0.05 * abs(steering_angle) + 0.35)
+
     print(steering_angle, throttle)
     send_control(steering_angle, throttle)
 
@@ -65,7 +69,7 @@ if __name__ == '__main__':
     model = load_model(args.model)
 
     # wrap Flask application with engineio's middleware
-    app = socketio.Middleware(sio, app)
+    app = socketio.Middleware(sio, Flask(__name__))
 
     # deploy as an eventlet WSGI server
     eventlet.wsgi.server(eventlet.listen(('', 4567)), app)
