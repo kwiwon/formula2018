@@ -6,18 +6,20 @@ from math import e, sqrt, pi
 
 import numpy as np
 import tensorflow as tf
+from keras import Input, Model
 from keras.callbacks import ModelCheckpoint
 from keras.layers import Cropping2D
 from keras.layers import Dense
 from keras.layers import Lambda
+from keras.layers import concatenate
 from keras.layers.convolutional import Convolution2D
 from keras.layers.core import Dropout
 from keras.layers.core import Flatten
 from keras.layers.pooling import AveragePooling2D
 from keras.layers.pooling import MaxPooling2D
-from keras.models import Sequential
 from keras.optimizers import Adam
 from keras.utils import Sequence
+from keras.utils.vis_utils import plot_model as plot
 from scipy.misc import imread
 from sklearn.model_selection import train_test_split
 from sklearn.utils import shuffle
@@ -120,44 +122,54 @@ def model_builder():
     """
     Define and compile model
     """
-    model = Sequential()
+    main_input = Input(shape=(240, 320, 3), name='main_input')
+
     # crop image 3@160x320 -> 3@80x320
-    model.add(Cropping2D(
+    x = Cropping2D(
         cropping=((50, 30), (0, 0)),
-        input_shape=(240, 320, 3)))
+        input_shape=(240, 320, 3))(main_input)
     # normalize rgb data [0~255] to [-1~1]
-    model.add(Lambda(_normalize))
+    x = Lambda(_normalize, name='RGB_Normalize')(x)
 
     # Convolution layers
     # Let network learn it's own color spaces
-    model.add(Convolution2D(3, (1, 1)))
+    x = Convolution2D(3, (1, 1))(x)
     # reshape image by 1/4 using average pooling later
-    model.add(AveragePooling2D(pool_size=(2, 2), strides=(2, 2)))
+    x = AveragePooling2D(pool_size=(2, 2), strides=(2, 2))(x)
     # 3@40x160
-    model.add(Convolution2D(24, (5, 5), activation='relu'))
-    model.add(MaxPooling2D((2, 2)))
+    x = Convolution2D(24, (5, 5), activation='relu')(x)
+    x = MaxPooling2D((2, 2))(x)
     # 24@18x78
-    model.add(Convolution2D(36, (5, 5), activation='relu'))
-    model.add(MaxPooling2D((2, 2), (1, 2)))
+    x = Convolution2D(36, (5, 5), activation='relu')(x)
+    x = MaxPooling2D((2, 2), (1, 2))(x)
     # 36@7x37
-    model.add(Convolution2D(48, (3, 3), activation='relu'))
-    model.add(MaxPooling2D((2, 2)))
+    x = Convolution2D(48, (3, 3), activation='relu')(x)
+    x = MaxPooling2D((2, 2))(x)
     # 48@5x35
-    model.add(Convolution2D(64, (3, 3), activation='relu'))
+    x = Convolution2D(64, (3, 3), activation='relu')(x)
     # 64@3x33
-    model.add(Convolution2D(64, (3, 3), activation='relu'))
+    x = Convolution2D(64, (3, 3), activation='relu')(x)
     # 64@1x31
 
     # Fully connected layers
-    model.add(Flatten())
-    model.add(Dropout(0.5))
-    model.add(Dense(100, activation='relu'))
-    model.add(Dropout(0.5))
-    model.add(Dense(50, activation='relu'))
-    model.add(Dense(10, activation='relu'))
-    model.add(Dense(2, activation='linear'))
+    x = Flatten()(x)
+    x = Dropout(0.5)(x)
+    x = Dense(100, activation='relu')(x)
+    x_out = Dropout(0.5)(x)
 
-    adam = Adam(decay=0.001)
+    # Another input for driving info
+    driving_input = Input(shape=(1,), name='driving_input')
+
+    # We stack a deep densely-connected network on top
+    x = concatenate([x_out, driving_input])
+    x = Dense(50, activation='relu')(x)
+    x = Dense(10, activation='relu')(x)
+
+    main_output = Dense(2, activation='linear', name='main_output')(x)
+
+    model = Model(inputs=[main_input, driving_input], outputs=[main_output])
+
+    adam = Adam(decay=0.0)
     model.compile(adam, loss='mse', metrics=['mse'])
     return model
 
@@ -172,8 +184,9 @@ class SequenceData(Sequence):
         return int(np.ceil(len(self.data) / float(self.batch_size)))
 
     def __getitem__(self, idx):
-        X_batch = []
-        y_batch = []
+        X_main_batch = []     # main input
+        X_driving_batch = []  # driving input
+        y_batch = []          # main output (labels)
 
         start = idx * self.batch_size
         end = (idx + 1) * self.batch_size
@@ -184,13 +197,16 @@ class SequenceData(Sequence):
             # Remember to cast data to numeric value
             steering = float(item[1])
             throttle = float(item[2])
+            brake = float(item[3])
+            speed = float(item[4])
             img, steering = load_img_data(item[0], steering=steering, random_flip=self.training)
 
             # Input/Output for model
-            X_batch.append(img)
-            y_batch.append((steering, throttle))
+            X_main_batch.append(img)
+            X_driving_batch.append(speed)
+            y_batch.append((steering, throttle - brake))
 
-        return np.array(X_batch), np.array(y_batch)
+        return [np.array(X_main_batch), np.asarray(X_driving_batch)], np.array(y_batch)
 
 
 if __name__ == '__main__':
