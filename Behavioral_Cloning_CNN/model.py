@@ -4,6 +4,7 @@ import os
 import random
 from math import e, sqrt, pi
 
+import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 from keras import Input, Model
@@ -112,6 +113,17 @@ def _normalize(X):
     return a + (X - x_min) * (b - a) / (x_max - x_min)
 
 
+# generator function for training and validating
+def batches(data, batch_size=128, training=False):
+    """Generator that generates data batch by batch
+        validating: indicates generator is in training mode
+        """
+    seq_data = SequenceData(data, batch_size=batch_size, training=training)
+    while True:
+        for i in range(len(seq_data)):
+            yield seq_data[i]
+
+
 ########################
 # Model / Data Generator
 ########################
@@ -165,9 +177,10 @@ def model_builder():
     x = Dense(50, activation='relu')(x)
     x = Dense(10, activation='relu')(x)
 
-    main_output = Dense(2, activation='linear', name='main_output')(x)
+    steering_output = Dense(1, name='steering_output')(x)
+    throttle_output = Dense(1, name='throttle_output')(x)
 
-    model = Model(inputs=[main_input, driving_input], outputs=[main_output])
+    model = Model(inputs=[main_input, driving_input], outputs=[steering_output, throttle_output])
 
     adam = Adam(decay=0.0)
     model.compile(adam, loss='mse', metrics=['mse'])
@@ -206,7 +219,10 @@ class SequenceData(Sequence):
             X_driving_batch.append(speed)
             y_batch.append((steering, throttle - brake))
 
-        return [np.array(X_main_batch), np.asarray(X_driving_batch)], np.array(y_batch)
+        X = [np.array(X_main_batch), np.asarray(X_driving_batch)]
+        y = np.hsplit(np.array(y_batch), 2)
+
+        return X, y
 
 
 if __name__ == '__main__':
@@ -237,11 +253,14 @@ if __name__ == '__main__':
     print('Start training... batch size %d' % batch_size)
     train_generator = SequenceData(data_train, batch_size=batch_size, training=True)
     test_generator = SequenceData(data_test, batch_size=batch_size)
+    # train_generator = batches(data_train, batch_size=batch_size, training=True)
+    # test_generator = batches(data_test, batch_size=batch_size)
     save_checkpoint = ModelCheckpoint(folder + '/checkpoint.{epoch:02d}.h5', period=100)
 
     print("Model fitting...")
-    model.fit_generator(
+    history = model.fit_generator(
         train_generator, epochs=nb_epochs, initial_epoch=init_epoch,
+        # steps_per_epoch=len(data_train), nb_val_samples=len(data_test),
         validation_data=test_generator,
         callbacks=[save_checkpoint])
     print('Finished!')
@@ -251,3 +270,17 @@ if __name__ == '__main__':
     print('Saving model...')
     model.save(model_save_name)
     print('Model has been save as %s' % model_save_name)
+
+    # List all data in history
+    print(history.history.keys())
+
+    # Summarize history for loss
+    plt.plot(history.history['steering_output_loss'])
+    plt.plot(history.history['val_steering_output_loss'])
+    plt.plot(history.history['throttle_output_loss'])
+    plt.plot(history.history['val_throttle_output_loss'])
+    plt.title('Model loss')
+    plt.ylabel('loss')
+    plt.xlabel('epoch')
+    plt.legend(['Train(steering)', 'Test(steering)', 'Train(throttle)', 'Test(throttle)'], loc='upper right')
+    plt.show()

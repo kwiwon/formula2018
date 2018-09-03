@@ -1,15 +1,13 @@
 import argparse
 import base64
-
-import numpy as np
-import socketio
-import eventlet.wsgi
-from PIL import Image
-from flask import Flask
 from io import BytesIO
 
+import eventlet.wsgi
+import numpy as np
+import socketio
+from PIL import Image
+from flask import Flask
 from keras.models import load_model
-
 
 # Fix error with Keras and TensorFlow
 # import tensorflow as tf
@@ -35,15 +33,21 @@ def telemetry(sid, data):
     # This model currently assumes that the features of the model are just the images. Feel free to change this.
     predictions = model.predict([transformed_image_array, np.asarray([speed])], batch_size=1)
     steering_angle = float(predictions[0][0])
-    throttle = float(predictions[0][1])
+    throttle = float(predictions[1][0])
 
     # Use rule-based throttle per steering_angle.
+    # For Track 1
     # if abs(steering_angle) > 5.0:
     #     throttle = 0.001
     # else:
-    #     throttle = max(0.01, -0.15/0.05 * abs(steering_angle) + 0.35)
+    #     throttle = max(0.01, -0.15 / 0.05 * abs(steering_angle) + 0.35)
 
-    print(steering_angle, throttle)
+    # For Track 2
+    # if abs(steering_angle) > 13.0:
+    #     throttle = 0.005
+    # else:
+    #     throttle = max(0.008, -0.10/0.05 * abs(steering_angle) + 0.35)
+
     send_control(steering_angle, throttle)
 
 
@@ -54,9 +58,10 @@ def connect(sid, environ):
 
 
 def send_control(steering_angle, throttle):
+    print(steering_angle, throttle)
     sio.emit("steer", data={
-    'steering_angle': steering_angle.__str__(),
-    'throttle': throttle.__str__()
+        'steering_angle': steering_angle.__str__(),
+        'throttle': throttle.__str__()
     }, skip_sid=True)
 
 
