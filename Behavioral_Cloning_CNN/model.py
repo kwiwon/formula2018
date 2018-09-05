@@ -4,6 +4,7 @@ import os
 import random
 from math import e, sqrt, pi
 
+import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
@@ -57,7 +58,7 @@ def gauss(x, mu=0, sigma=0.18):
 max_gauss = gauss(0)
 
 
-def _should_drop(steering, drop_rate=0.7):
+def _should_drop(steering, drop_rate=0.5):
     """
     Randomly drop some data that drives around 0 degree
     (in a normal distribution manager.)
@@ -94,9 +95,59 @@ def load_data(file_path):
     return np.asarray(data)
 
 
+def preprocess_img(src_img):
+    # Preprocessing - clean irrelevant information from tracks
+    r, g, b = cv2.split(src_img)
+    max_f = np.maximum(np.maximum(r, g), b)
+    r_filter = r == max_f
+    g_filter = g == max_f
+    b_filter = b == max_f
+    r[r_filter], r[np.invert(r_filter)] = 255, 0
+    g[g_filter], g[np.invert(g_filter)] = 255, 0
+    b[b_filter], b[np.invert(b_filter)] = 255, 0
+    mono_tone = cv2.merge([r, g, b])
+
+    # Preprocessing - Grayscale
+    gray_scale_img = cv2.cvtColor(mono_tone, cv2.COLOR_RGB2GRAY)
+
+    # Cut out irrelevant parts
+    h, w = gray_scale_img.shape
+    gray_scale_img[:int(h / 2), :] = 0
+
+    # Edge detection
+    edge_img = cv2.Canny(gray_scale_img, 50, 150)
+    return edge_img
+
+
+def color_replacer(frame, replace_color):
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    lower_lred = np.array([0, 100, 100], dtype="uint16")
+    upper_lred = np.array([10, 255, 255], dtype="uint16")
+    red_lower_mask = cv2.inRange(hsv, lower_lred, upper_lred)
+    frame[red_lower_mask > 0] = replace_color
+
+    lower_ured = np.array([160, 100, 100], dtype="uint16")
+    upper_ured = np.array([179, 255, 255], dtype="uint16")
+    red_upper_mask = cv2.inRange(hsv, lower_ured, upper_ured)
+    frame[red_upper_mask > 0] = replace_color
+
+    lower_green = np.array([40, 50, 100], dtype="uint16")
+    upper_green = np.array([75, 255, 255], dtype="uint16")
+    green_mask = cv2.inRange(hsv, lower_green, upper_green)
+    frame[green_mask > 0] = replace_color
+
+    lower_blue = np.array([103, 50, 50], dtype="uint16")
+    upper_blue = np.array([140, 255, 255], dtype="uint16")
+    blue_mask = cv2.inRange(hsv, lower_blue, upper_blue)
+    frame[blue_mask > 0] = replace_color
+    return frame
+
+
 def load_img_data(img_name, steering, random_flip=False, img_path=img_path):
     """Load image data (and randomly flip if required)"""
-    img = imread(img_path + img_name).astype(np.float32)
+    # img = imread(img_path + img_name).astype(np.float32)
+    img = cv2.imread(img_path + img_name)
+    img = color_replacer(img, replace_color=(0, 0, 255))
 
     if random_flip and random.random() > 0.5:
         img = np.fliplr(img)
@@ -106,8 +157,8 @@ def load_img_data(img_name, steering, random_flip=False, img_path=img_path):
 
 
 def _normalize(X):
-    a = -1.0
-    b = 1.0
+    a = -0.1
+    b = 0.1
     x_min = 0
     x_max = 255
     return a + (X - x_min) * (b - a) / (x_max - x_min)
@@ -137,9 +188,7 @@ def model_builder():
     main_input = Input(shape=(240, 320, 3), name='main_input')
 
     # crop image 3@160x320 -> 3@80x320
-    x = Cropping2D(
-        cropping=((50, 30), (0, 0)),
-        input_shape=(240, 320, 3))(main_input)
+    x = Cropping2D(cropping=((108, 30), (0, 0)))(main_input)
     # normalize rgb data [0~255] to [-1~1]
     x = Lambda(_normalize, name='RGB_Normalize')(x)
 
@@ -275,12 +324,24 @@ if __name__ == '__main__':
     print(history.history.keys())
 
     # Summarize history for loss
-    plt.plot(history.history['steering_output_loss'])
-    plt.plot(history.history['val_steering_output_loss'])
-    plt.plot(history.history['throttle_output_loss'])
-    plt.plot(history.history['val_throttle_output_loss'])
-    plt.title('Model loss')
-    plt.ylabel('loss')
-    plt.xlabel('epoch')
-    plt.legend(['Train(steering)', 'Test(steering)', 'Train(throttle)', 'Test(throttle)'], loc='upper right')
+    fig, ax1 = plt.subplots()
+
+    # Steering Loss
+    ax1.set_title('Model loss')
+    ax1.set_xlabel('epoch')
+    ax1.set_ylabel('steering angle loss')
+    ax1.tick_params('y')
+    ax1.plot(history.history['steering_output_loss'], label='Train(steering', color='C0')
+    ax1.plot(history.history['val_steering_output_loss'], label='Test(steering)', color='C1')
+    ax1.legend(loc='upper left')
+
+    # Throttle Loss
+    ax2 = ax1.twinx()
+    ax2.set_ylabel('throttle loss')
+    ax2.tick_params('y')
+    ax2.plot(history.history['throttle_output_loss'], label='Train(throttle)', color='C2')
+    ax2.plot(history.history['val_throttle_output_loss'], label='Test(throttle)', color='C3')
+    ax2.legend(loc='upper right')
+
+    fig.tight_layout()
     plt.show()
