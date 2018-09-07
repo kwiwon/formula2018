@@ -1,6 +1,7 @@
 import base64
 from io import BytesIO
 
+import cv2
 import eventlet.wsgi
 import numpy as np
 import socketio
@@ -19,6 +20,30 @@ class Status(object):
     RUNNING = 0
     FINISHED = 1  # All laps completed, the connection will be terminated soon.
     TIMEOUT = 2  # Timeout limit reached, the connection will be terminated soon.
+
+
+def color_replacer(frame, replace_color):
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    lower_lred = np.array([0, 100, 100], dtype="uint16")
+    upper_lred = np.array([10, 255, 255], dtype="uint16")
+    red_lower_mask = cv2.inRange(hsv, lower_lred, upper_lred)
+    frame[red_lower_mask > 0] = replace_color
+
+    lower_ured = np.array([160, 100, 100], dtype="uint16")
+    upper_ured = np.array([179, 255, 255], dtype="uint16")
+    red_upper_mask = cv2.inRange(hsv, lower_ured, upper_ured)
+    frame[red_upper_mask > 0] = replace_color
+
+    lower_green = np.array([40, 50, 100], dtype="uint16")
+    upper_green = np.array([75, 255, 255], dtype="uint16")
+    green_mask = cv2.inRange(hsv, lower_green, upper_green)
+    frame[green_mask > 0] = replace_color
+
+    lower_blue = np.array([103, 50, 50], dtype="uint16")
+    upper_blue = np.array([140, 255, 255], dtype="uint16")
+    blue_mask = cv2.inRange(hsv, lower_blue, upper_blue)
+    frame[blue_mask > 0] = replace_color
+    return frame
 
 
 @sio.on('telemetry')
@@ -41,10 +66,11 @@ def telemetry(sid, data):
 
     image = Image.open(BytesIO(base64.b64decode(imgString)))
     image_array = np.asarray(image)
+    image_array = color_replacer(image_array.copy(), replace_color=(0, 0, 255))
     transformed_image_array = image_array[None, :, :, :]
 
     # This model currently assumes that the features of the model are just the images. Feel free to change this.
-    predictions = model.predict(transformed_image_array, batch_size=1)
+    predictions = model.predict([transformed_image_array, np.asarray([speed])], batch_size=1)
     steering_angle = float(predictions[0][0])
 
     # Use rule-based throttle per steering_angle.
