@@ -1,19 +1,23 @@
-FROM python:3.6
+# model from colab need python:3.6.3
+FROM python:3.6 
 
 # Install necessary packages
 RUN apt-get update
 RUN apt-get install -y python-opencv
 
 # install python packages   
-RUN pip install pillow flask-socketio eventlet tensorflow==1.10.1 keras numpy==1.14.5
+# RUN pip install pillow flask-socketio eventlet tensorflow==1.10.1 keras numpy==1.14.5
 
 # cleanup 
 RUN apt-get clean
   
 # Copy the current directory contents into the container at /app
 RUN mkdir /app
-COPY bot_candidates/formula-trend/02/ /app
-  
+COPY bot_candidates/formula-trend/03/ /app
+
+# install python packages 
+RUN pip install -r /app/requirements.txt
+
 # Set the working directory to /app
 WORKDIR /app
 
