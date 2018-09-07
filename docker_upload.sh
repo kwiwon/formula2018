@@ -30,13 +30,13 @@ fi
 practice_tag="$REGISTRY/$project_name/$PROJECT:practice"
 rank_tag="$REGISTRY/$project_name/$PROJECT:rank"
 
-# docker build -t $PROJECT .
-# for tag in $practice_tag $rank_tag;
-# do
-#     docker tag $PROJECT $tag
-#     docker push $tag
-#     docker rmi $tag
-# done
+docker build -t $PROJECT .
+for tag in $practice_tag $rank_tag;
+do
+    docker tag $PROJECT $tag
+    docker push $tag
+    docker rmi $tag
+done
 
 echo "Clean up your env"
 # tags=$(docker history $(docker images -a | grep 'practice'  | awk '{print $3}') | awk '{print $1}' | grep -v "missing\|IMAGE")
@@ -45,5 +45,5 @@ docker rmi $PROJECT
 docker logout $REGISTRY
 
 echo ""
-echo "Upload completed"
+echo "Upload complete"
 echo "Run \"docker login $REGISTRY; docker run -ti -p 4567:4567 $rank_tag\" to do local testing"
