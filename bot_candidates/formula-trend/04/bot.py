@@ -983,7 +983,7 @@ if __name__ == "__main__":
             help='Path to image folder to record the images.'
     )
     track_name="Track_5"
-    text_file_path = "logs/car_training_data_" + track_name + ".txt"
+    text_file_path = "/log/car_training_data_" + track_name + ".txt"
     car_training_data_collector=TrainingDataCollector(text_file_path)
     message = "lap,steering_angle,Kp,Ki,Kd,throttle"
     car_training_data_collector.save_data_direct(message)
