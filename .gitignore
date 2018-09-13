@@ -4,3 +4,5 @@
 venv/
 *.log
 data/
+user/mark/formula/behavioral_cloning/*.h5
+user/mark/formula/behavioral_cloning/*.json

@@ -7,17 +7,24 @@
 #
 #coding=UTF-8
 
-from time import time
-from PIL  import Image
-from io   import BytesIO
-import os
-import cv2
-import math
-import numpy as np
+import argparse
 import base64
 import logging
+import math
+import os
 import tempfile
+from io import BytesIO
+from time import time
 
+import cv2
+import eventlet.wsgi
+import numpy as np
+import socketio
+from PIL import Image
+from flask import Flask
+
+from interface.car import Car
+from traffic_sign.TrafficSign import identifyTrafficSign
 
 IS_DEBUG=False
 TESTING=False
@@ -27,7 +34,7 @@ class Log(object):
         self.is_debug=is_debug
         self.msg=None
         self.logger = logging.getLogger('hearts_logs')
-        hdlr = logging.FileHandler('/log/hearts_logs.log')
+        hdlr = logging.FileHandler(os.path.join(os.getcwd(), 'hearts_logs.log'))
         formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
         hdlr.setFormatter(formatter)
         self.logger.addHandler(hdlr)
@@ -870,7 +877,7 @@ class AutoDrive(object):
 
     debug = False
 
-    def __init__(self, car,car_training_data_collector, record_folder = None):
+    def __init__(self, car_training_data_collector, record_folder=None, do_sign_detection=True):
         self._record_folder    = record_folder
         self._steering_pid     = PID("wheel",Kp=self.STEERING_PID_Kp  , Ki=self.STEERING_PID_Ki  , Kd=self.STEERING_PID_Kd  , max_integral=self.STEERING_PID_max_integral)
         self._throttle_pid     = PID("throttle",Kp=self.THROTTLE_PID_Kp  , Ki=self.THROTTLE_PID_Ki  , Kd=self.THROTTLE_PID_Kd  , max_integral=self.THROTTLE_PID_max_integral)
@@ -879,15 +886,23 @@ class AutoDrive(object):
         #Historical data
         self._steering_history = []
         self._throttle_history = []
-        #Register card to auto driving
-        self._car = car
-        self._car.register(self)
-        self.current_lap=1
+        self.current_lap = 1
+        self.do_sign_detection = do_sign_detection
+        if self.do_sign_detection:
+            self._sign = identifyTrafficSign()
+        else:
+            self._sign = None
 
     #When you get the input data
     def on_dashboard(self, src_img, last_steering_angle, speed, throttle, info):
         track_img     = ImageProcessor.preprocess(src_img) #get track image
         #cur_radian, line_results = self.m_twQTeamImageProcessor.findSteeringAngle(src_img, proc_img)
+
+        # TODO: Navigate to correct track based on detected traffic sign
+        if self.do_sign_detection:
+            trafficSign = self._sign.detect(src_img)
+            if trafficSign is not None and trafficSign != "None":
+                print(trafficSign)
 
         current_angle = ImageProcessor.find_steering_angle_by_color(track_img, last_steering_angle, debug = self.debug)
         #current_angle = ImageProcessor.find_steering_angle_by_line(track_img, last_steering_angle, debug = self.debug)
@@ -931,21 +946,19 @@ class AutoDrive(object):
         self._throttle_history.append(throttle)
         self._throttle_history = self._throttle_history[-self.MAX_THROTTLE_HISTORY:]
 
-        self._car.control(sum(self._steering_history)/self.MAX_STEERING_HISTORY, sum(self._throttle_history)/self.MAX_THROTTLE_HISTORY)
+        new_steering_angle = sum(self._steering_history)/self.MAX_STEERING_HISTORY
+        new_throttle = sum(self._throttle_history)/self.MAX_THROTTLE_HISTORY
+        return new_steering_angle, new_throttle
 
-class Car(object):
+
+class PIDCar(Car):
     MAX_STEERING_ANGLE = 40.0
 
-    def __init__(self, control_function):
-        self._driver = None
-        self._control_function = control_function
-
-
-    def register(self, driver):
+    def __init__(self, driver):
         self._driver = driver
 
     def on_dashboard(self, dashboard):
-        #normalize the units of all parameters
+        # normalize the units of all parameters
         last_steering_angle = np.pi/2 - float(dashboard["steering_angle"]) / 180.0 * np.pi #steel wheel angle
         throttle            = float(dashboard["throttle"]) #speed control
         speed               = float(dashboard["speed"]) # current speed
@@ -962,22 +975,30 @@ class Car(object):
             "elapsed": elapsed,
             "status" : int(dashboard["status"]) if "status" in dashboard else 0,
         }
-        self._driver.on_dashboard(img, last_steering_angle, speed, throttle, info)
 
-    def control(self, steering_angle, throttle):
-        #convert the values with proper units
-        steering_angle = min(max(ImageProcessor.rad2deg(steering_angle), -Car.MAX_STEERING_ANGLE), Car.MAX_STEERING_ANGLE)
-        self._control_function(steering_angle, throttle)
+        new_steering_angle, new_throttle = self._driver.on_dashboard(img, last_steering_angle, speed, throttle, info)
+        # convert the values with proper units
+        new_steering_angle = min(max(ImageProcessor.rad2deg(new_steering_angle), -PIDCar.MAX_STEERING_ANGLE), PIDCar.MAX_STEERING_ANGLE)
+
+        return new_steering_angle, new_throttle
+
+
+def create_pid_driver(car_training_data_collector=None, record_folder=None, do_sign_detection=True):
+
+    if not car_training_data_collector:
+        track_name = "Track_5"
+        text_file_path = os.path.join(os.getcwd(), "car_training_data_" + track_name + ".log")
+        car_training_data_collector = TrainingDataCollector(text_file_path)
+        message = "lap,steering_angle,Kp,Ki,Kd,throttle"
+        car_training_data_collector.save_data_direct(message)
+
+    return AutoDrive(car_training_data_collector, record_folder, do_sign_detection)
+
+
+ImageProcessor.switch_color(ImageProcessor.AUTO_DETECT)
+
 
 if __name__ == "__main__":
-    import shutil
-    import argparse
-    from datetime import datetime
-
-    import socketio
-    import eventlet
-    import eventlet.wsgi
-    from flask import Flask
 
     parser = argparse.ArgumentParser(description='AutoDriveBot')
     parser.add_argument(
@@ -987,18 +1008,18 @@ if __name__ == "__main__":
             default='',
             help='Path to image folder to record the images.'
     )
-    track_name="Track_5"
-    text_file_path = "/log/car_training_data_" + track_name + ".txt"
-    car_training_data_collector=TrainingDataCollector(text_file_path)
-    message = "lap,steering_angle,Kp,Ki,Kd,throttle"
-    car_training_data_collector.save_data_direct(message)
     args = parser.parse_args()
-    ImageProcessor.switch_color(ImageProcessor.AUTO_DETECT)
-    #Inpiut arguments
+
+    # Input arguments
     if args.record:
         if not os.path.exists(args.record):
             os.makedirs(args.record)
         logit("Start recording images to %s..." % args.record)
+
+    # Create car with PID driver
+    driver = create_pid_driver(record_folder=args.record)
+    car = PIDCar(driver=driver)
+
     sio = socketio.Server()
 
     def send_control(steering_angle, throttle):
@@ -1009,19 +1030,19 @@ if __name__ == "__main__":
                 'throttle': str(throttle)
             },
             skip_sid=True)
-    car = Car(control_function = send_control)
-    drive = AutoDrive(car,car_training_data_collector, args.record)
 
     @sio.on('telemetry')
     def telemetry(sid, dashboard):
         if dashboard:
-            car.on_dashboard(dashboard)
+            steering_angle, throttle = car.on_dashboard(dashboard)
+            send_control(steering_angle, throttle)
         else:
             sio.emit('manual', data={}, skip_sid=True)
 
     @sio.on('connect')
     def connect(sid, environ): # First time connect to car and environment
-        car.control(0, 0)
+        send_control(0, 0)
+
     app = socketio.Middleware(sio, Flask(__name__))
     eventlet.wsgi.server(eventlet.listen(('', 4567)), app)
 
