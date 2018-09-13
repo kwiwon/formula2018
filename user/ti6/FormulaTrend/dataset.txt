@@ -1,0 +1,7 @@
+
+dataset_driving_records
+https://www.tbox.trend.com.tw/app#folder/STbrN/AI_Car_Q_team_TOI/driving-records-20180906.zip?a=Rtpzjn231pA
+
+
+dataset_traffic_sign
+https://www.tbox.trend.com.tw/app#folder/STbrN/AI_Car_Q_team_TOI/trafficSignDataset.zip?a=vgW5q2Q-Vdg

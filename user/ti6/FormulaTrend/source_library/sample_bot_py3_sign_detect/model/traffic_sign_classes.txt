@@ -1,0 +1,9 @@
+ForkLeft
+ForkRight
+Obstacle
+TurnLeft
+TurnRight
+UTurnLeft
+UTurnRight
+WarningLeft
+WarningRight
