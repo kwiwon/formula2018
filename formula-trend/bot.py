@@ -38,10 +38,10 @@ def send_control(steering_angle, throttle):
 
 if __name__ == '__main__':
     # Create PID car
-    car = PIDCar(driver=create_pid_driver())
+    car = PIDCar(driver=create_pid_driver(do_sign_detection=False))
 
     # Create car of behavior cloning model
-    car = BeCar(model_path=path.join(getcwd(), "behavior_cloning", "model.json"))
+    # car = BeCar(model_path=path.join(getcwd(), "behavior_cloning", "model.json"))
 
     # wrap Flask application with engineio's middleware
     app = socketio.Middleware(sio, Flask(__name__))

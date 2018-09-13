@@ -24,6 +24,7 @@ from PIL import Image
 from flask import Flask
 
 from interface.car import Car
+from traffic_sign.TrafficSign import identifyTrafficSign
 
 IS_DEBUG=False
 TESTING=False
@@ -871,7 +872,7 @@ class AutoDrive(object):
 
     debug = False
 
-    def __init__(self, car_training_data_collector, record_folder=None):
+    def __init__(self, car_training_data_collector, record_folder=None, do_sign_detection=True):
         self._record_folder    = record_folder
         self._steering_pid     = PID("wheel",Kp=self.STEERING_PID_Kp  , Ki=self.STEERING_PID_Ki  , Kd=self.STEERING_PID_Kd  , max_integral=self.STEERING_PID_max_integral)
         self._throttle_pid     = PID("throttle",Kp=self.THROTTLE_PID_Kp  , Ki=self.THROTTLE_PID_Ki  , Kd=self.THROTTLE_PID_Kd  , max_integral=self.THROTTLE_PID_max_integral)
@@ -881,11 +882,19 @@ class AutoDrive(object):
         self._steering_history = []
         self._throttle_history = []
         self.current_lap = 1
+        self._sign = identifyTrafficSign()
+        self.do_sign_detection = do_sign_detection
 
     #When you get the input data
     def on_dashboard(self, src_img, last_steering_angle, speed, throttle, info):
         track_img     = ImageProcessor.preprocess(src_img) #get track image
         #cur_radian, line_results = self.m_twQTeamImageProcessor.findSteeringAngle(src_img, proc_img)
+
+        # TODO: Navigate to correct track based on detected traffic sign
+        if self.do_sign_detection:
+            trafficSign = self._sign.detect(src_img)
+            if trafficSign is not None and trafficSign != "None":
+                print(trafficSign)
 
         current_angle = ImageProcessor.find_steering_angle_by_color(track_img, last_steering_angle, debug = self.debug)
         #current_angle = ImageProcessor.find_steering_angle_by_line(track_img, last_steering_angle, debug = self.debug)
@@ -966,16 +975,16 @@ class PIDCar(Car):
         return new_steering_angle, new_throttle
 
 
-def create_pid_driver(car_training_data_collector=None, record_folder=None):
+def create_pid_driver(car_training_data_collector=None, record_folder=None, do_sign_detection=True):
 
     if not car_training_data_collector:
         track_name = "Track_5"
-        text_file_path = os.path.join(os.getcwd(), "car_training_data_" + track_name + ".txt")
+        text_file_path = os.path.join(os.getcwd(), "car_training_data_" + track_name + ".log")
         car_training_data_collector = TrainingDataCollector(text_file_path)
         message = "lap,steering_angle,Kp,Ki,Kd,throttle"
         car_training_data_collector.save_data_direct(message)
 
-    return AutoDrive(car_training_data_collector, record_folder)
+    return AutoDrive(car_training_data_collector, record_folder, do_sign_detection)
 
 
 ImageProcessor.switch_color(ImageProcessor.AUTO_DETECT)
