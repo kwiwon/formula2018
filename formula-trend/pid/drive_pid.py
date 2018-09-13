@@ -857,18 +857,23 @@ class ImageProcessor(object):
         return (np.pi/2 - steering_angle) * 2.0
 
 class AutoDrive(object):
-    #Two PID controllers (steer and throttle controller)
-    STEERING_PID_Kp = 0.2 #0.3-0.06(0.2)
-    STEERING_PID_Ki = 0.008 #0.01-0.003(0.008)
-    STEERING_PID_Kd = 0.08 #0.1-0.03 (0.08)
+    STEERING_PID_Ku = 0.15
+    STEERING_PID_Pu = 125
+
+    # Two PID controllers (steer and throttle controller)
+    STEERING_PID_Kp = 0.6 * STEERING_PID_Ku
+    STEERING_PID_Ki = 2 * STEERING_PID_Kp / STEERING_PID_Pu
+    STEERING_PID_Kd = STEERING_PID_Kp * STEERING_PID_Pu / 8
     STEERING_PID_max_integral = 40
+
     THROTTLE_PID_Kp = 0.02
     THROTTLE_PID_Ki = 0.005
     THROTTLE_PID_Kd = 0.02
     THROTTLE_PID_max_integral = 0.5
+
     MAX_STEERING_HISTORY = 3
     MAX_THROTTLE_HISTORY = 3
-    DEFAULT_SPEED = 0.5
+    DEFAULT_SPEED = 1.0
 
     debug = False
 
@@ -882,8 +887,11 @@ class AutoDrive(object):
         self._steering_history = []
         self._throttle_history = []
         self.current_lap = 1
-        self._sign = identifyTrafficSign()
         self.do_sign_detection = do_sign_detection
+        if self.do_sign_detection:
+            self._sign = identifyTrafficSign()
+        else:
+            self._sign = None
 
     #When you get the input data
     def on_dashboard(self, src_img, last_steering_angle, speed, throttle, info):
