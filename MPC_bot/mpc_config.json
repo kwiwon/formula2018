@@ -1,0 +1,21 @@
+{
+    "debug": false,
+    "num_predict_steps": 6,
+    "step_duration": 5,
+    "Lf": 1,
+    "latency": 0.1,
+    "max_acceleration": 1,
+    "max_steering_angle": 40,
+    "ref_cte": 0,
+    "ref_epsi": 0,
+    "ref_speed": 1,
+    "weight": {
+        "cte": 50,
+        "epsi": 50,
+        "speed": 9000,
+        "actuator_steering": 100000,
+        "actuator_throttle": 50,
+        "steering_change": 100000,
+        "throttle_change": 50
+    }
+}
