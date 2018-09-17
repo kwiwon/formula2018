@@ -266,6 +266,83 @@ class ImageProcessor(object):
         return matched
 
     @staticmethod
+    def mask_frame_color(frame, min_values, max_values):
+        """
+        Mask a frame by RGB color
+        """
+
+        min_th_ok = np.all(frame > min_values, axis=2)
+        max_th_ok = np.all(frame < max_values, axis=2)
+
+        out = np.logical_and(min_th_ok, max_th_ok)
+
+        return out
+
+    @staticmethod
+    def binarize(img):
+        """
+        Convert an input frame to a binary image
+        :param img: input color frame
+        :param verbose: if True, show intermediate results
+        :return: binarized frame
+        """
+        B_min = np.array([100, 0, 0])
+        B_max = np.array([255, 150, 150])
+
+        G_min = np.array([0, 100, 0])
+        G_max = np.array([150, 255, 150])
+
+        R_min = np.array([0, 0, 100])
+        R_max = np.array([150, 150, 255])
+
+        h, w = img.shape[:2]
+        binary = np.zeros(shape=(h, w), dtype=np.uint8)
+
+        B_mask = ImageProcessor.mask_frame_color(img, B_min, B_max)
+        binary = np.logical_or(binary, B_mask)
+
+        G_mask = ImageProcessor.mask_frame_color(img, G_min, G_max)
+        binary = np.logical_or(binary, G_mask)
+
+        R_mask = ImageProcessor.mask_frame_color(img, R_min, R_max)
+        binary = np.logical_or(binary, R_mask)
+
+        # get Sobel binary mask (thresholded gradients)
+        # sobel_mask = mask_frame_sobel(img, kernel_size=9)
+        # binary = np.logical_or(binary, sobel_mask)
+
+        # apply a light morphology to "fill the gaps" in the binary image
+        kernel = np.ones((5, 5), np.uint8)
+        closing = cv2.morphologyEx(binary.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
+
+        return closing
+
+    @staticmethod
+    def check_recovery_direction(img):
+        """
+        check if we should move forward or backward. also check if we hit right wall or left wall
+        """
+        move_forward = False
+        px = 0
+        # use only a 10-pixel slice to enhance performance. 150~160 is based on experience.
+        part = slice(150, 160)
+        section = img[part, :]
+
+        # turn RGB images into binary images
+        section = ImageProcessor.binarize(section)
+        _y, _x = np.where(section == 1)
+        len_x = len(_x)
+        # if there is no obstacle/wall ahead, move forward, else backward
+        if len_x > 3000:
+            move_forward = True
+
+        # if px > 160, it should be left wall. otherwise, right wall.
+        if len_x > 500:
+            px = np.mean(_x)
+
+        return move_forward, px
+
+    @staticmethod
     def find_steering_angle_by_line(img, last_steering_angle, debug=True):
         steering_angle = 0.0
         lines = ImageProcessor.find_lines(img)
@@ -631,6 +708,14 @@ class AutoDrive(object):
         self._car.register(self)
         self._mpc_model = MPC(mpc_library_path, mpc_settings_path, debug=self.debug)
 
+        self.angle_before_hit_wall = 0
+        self.hit_wall = False
+
+        self._crash = 0
+        self._record_images = []
+        self._recover_mode = 0
+        self._recover_steering = 0.0
+
     def on_dashboard(self, src_img, last_steering_angle, speed, throttle, info):
         if USE_MPC:
             self.on_dashboard_mpc(src_img, last_steering_angle, speed, throttle, info)
@@ -686,8 +771,15 @@ class AutoDrive(object):
                 cv2.circle(src_img, (int(x), int(y)), 5, (0, 255, 0))
             ImageProcessor.show_image(src_img, "source")
 
-        if predict_result:
-            self._car.control(result_dict['steering_angle'], result_dict['throttle'])
+        crashed = self.crash_detector(speed)
+        if crashed:
+            steering_angle, throttle = self.crash_recover(src_img, speed)
+            self._car.control(steering_angle, throttle)
+        else:
+            if predict_result:
+                self._car.control(result_dict['steering_angle'], result_dict['throttle'])
+
+        self.record_image(src_img)
 
     def on_dashboard_pid(self, src_img, last_steering_angle, speed, throttle, info):
         track_img = current_angle = None
@@ -730,6 +822,66 @@ class AutoDrive(object):
 
         self._car.control(sum(self._steering_history) / self.MAX_STEERING_HISTORY,
                           sum(self._throttle_history) / self.MAX_THROTTLE_HISTORY)
+
+    def crash_detector(self, speed):
+        """
+        detect if a crash occurred
+        """
+        crash = False
+
+        # consider speed < 0.1 sort of crash
+        if speed < 0.1:
+            self._crash = self._crash + 1
+        elif self._recover_mode == 0 and speed >= 0.3:
+            self._crash = 0
+
+        # it can be 5 or even shorter, depending on your bot behavior
+        if self._crash >= 8:
+            crash = True
+
+        return crash
+
+    def record_image(self, src_img):
+        """
+        record last 100 images for replay. used to detect when a crash hit right wall or left wall
+        """
+
+        self._record_images.append(src_img)
+        self._record_images = self._record_images[-100:]
+
+    def crash_recover(self, src_img, speed):
+        """
+        decide recover steering angle and throttle based on the image replay
+        """
+        self._recover_mode = 1
+
+        # skip calculating recover steering angle if we already have it
+        if self._recover_steering == 0.0:
+            for i in range(1, len(self._record_images)):
+                # replay the recorded images backward. check if the car hit right wall or left wall
+                _, px = ImageProcessor.check_recovery_direction(self._record_images[-i])
+                # px > 165 means left wall. px < 155 means right wall
+                if px > 165:
+                    self._recover_steering = -40
+                    break
+                elif 0 < px < 155:
+                    self._recover_steering = 40
+                    break
+        # check if we should move forward or backward
+        move_forward, px = ImageProcessor.check_recovery_direction(src_img)
+        if move_forward:
+            # print("recovery end")
+            recover_steering = -self._recover_steering
+            recover_throttle = 0.2
+            self._recover_mode = 0
+            self._crash = 0
+            self._recover_steering = 0.0
+        else:
+            # print("recovering")
+            recover_steering = self._recover_steering
+            recover_throttle = -0.3
+
+        return recover_steering, recover_throttle
 
 
 class Car(object):
