@@ -5,6 +5,7 @@
 # Revision:      v1.2
 # Released Date: Aug 20, 2018
 #
+from __future__ import print_function
 
 from time import time, sleep
 from PIL import Image
@@ -28,7 +29,7 @@ class MPC_MODE(Enum):
     mpc_control_by_line = 0
     mpc_control_by_color = 1
 
-mpc_library_path = "./libmpc_mac.so"
+mpc_library_path = "./libmpc_linux.so"
 mpc_settings_path = "./mpc_config.json"
 
 USE_MPC = True
@@ -38,17 +39,20 @@ def logit(msg):
     print("%s" % msg)
 
 class MPC(object):
-    def __init__(self, lib_path, model_settings_path):
+    def __init__(self, lib_path, model_settings_path, debug=False):
         self.mpc_lib = cdll.LoadLibrary(lib_path)
         self.mpc_lib.ChangeSettings(c_char_p(model_settings_path))
+        self.debug = debug
 
     def run(self, ptsx, ptsy, v):
         telemetry = {"ptsx": ptsx, "ptsy": ptsy, "speed": v}
-        print telemetry
+        if self.debug:
+            print(telemetry)
         # self.mpc_lib.Predict.argtypes = [c_char_p]
         self.mpc_lib.Predict.restype = c_char_p
         res = self.mpc_lib.Predict(c_char_p(json.dumps(telemetry)))
-        print res
+        if self.debug:
+            print(res)
         return res
 
 class PID:
@@ -308,7 +312,7 @@ class ImageProcessor(object):
             cv2.line(img, best_coord[:2], best_coord[2:], (0, 255, 255), 2)
 
         if abs(best_thetaB - np.pi / 2) <= tolerance and abs(best_thetaA - best_thetaB) >= np.pi / 4:
-            print "*** sharp turning"
+            print("*** sharp turning")
             best_x1, best_y1, best_x2, best_y2 = best_coord
             f = lambda x: int(
                 ((float(best_y2) - float(best_y1)) / (float(best_x2) - float(best_x1)) * (x - float(best_x1))) + float(
@@ -539,7 +543,7 @@ class ImageProcessor(object):
         return result_point
 
     @staticmethod
-    def find_mpc_ref_points(img, init_point, lower_hsv, upper_hsv):
+    def find_mpc_ref_points(img, init_point, lower_hsv, upper_hsv, debug=False):
         image_height = img.shape[0]
         shift = 10
         step_scale = 5
@@ -548,7 +552,8 @@ class ImageProcessor(object):
         pre_point = init_point
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv, np.array(lower_hsv), np.array(upper_hsv))
-        ImageProcessor.show_image(mask, 'mask')
+        if debug:
+            ImageProcessor.show_image(mask, 'mask')
         while image_height > int(image_height * 0.2):
             start_y = (image_height - shift)
             src = mask[start_y: start_y + 30]
@@ -566,11 +571,12 @@ class ImageProcessor(object):
         return ref_points
 
     @staticmethod
-    def mpc_control_by_color(img, lower_hsv, upper_hsv):
+    def mpc_control_by_color(img, lower_hsv, upper_hsv, debug=False):
         ref_points = ImageProcessor.find_mpc_ref_points(img=img,
                                                         init_point=(img.shape[1] / 2, 0),
                                                         lower_hsv=lower_hsv,
-                                                        upper_hsv=upper_hsv)
+                                                        upper_hsv=upper_hsv,
+                                                        debug=debug)
 
         return ref_points
 
@@ -610,7 +616,7 @@ class AutoDrive(object):
     MAX_THROTTLE_HISTORY = 3
     DEFAULT_SPEED = 0.5
 
-    debug = True
+    debug = False
 
     def __init__(self, car, record_folder=None):
         self._record_folder = record_folder
@@ -623,7 +629,7 @@ class AutoDrive(object):
         self._throttle_history = []
         self._car = car
         self._car.register(self)
-        self._mpc_model = MPC(mpc_library_path, mpc_settings_path)
+        self._mpc_model = MPC(mpc_library_path, mpc_settings_path, debug=self.debug)
 
     def on_dashboard(self, src_img, last_steering_angle, speed, throttle, info):
         if USE_MPC:
@@ -638,7 +644,8 @@ class AutoDrive(object):
             r_lower_bound = (0, 43, 46)
             b_upper_bound = (150, 255, 255)
             b_lower_bound = (90, 50, 50)
-            ref_points = ImageProcessor.mpc_control_by_color(cv2.blur(src_img, (10, 10)), b_lower_bound, b_upper_bound)
+            ref_points = ImageProcessor.mpc_control_by_color(cv2.blur(src_img, (10, 10)), b_lower_bound, b_upper_bound,
+                                                             self.debug)
         else:
             # img = cv2.blur(src_img, (10, 10))
             # hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
@@ -651,7 +658,8 @@ class AutoDrive(object):
             track_img = ImageProcessor.preprocess(src_img)
             ref_points = ImageProcessor.mpc_control_by_line(track_img)
             src_img = copy.copy(track_img)
-            print("ref_points: %s " % ref_points)
+            if self.debug:
+                print("ref_points: %s " % ref_points)
 
         image_height = src_img.shape[0]
         image_width = src_img.shape[1]
@@ -661,8 +669,8 @@ class AutoDrive(object):
             mpc_ref_point = (image_height - point[1], camera_point[0] - point[0])
             mpc_ref_points.append(mpc_ref_point)
         point_scale = 5
-        predict_result = self._mpc_model.run([point[0]/point_scale for point in mpc_ref_points],
-                                             [point[1]/point_scale for point in mpc_ref_points],
+        predict_result = self._mpc_model.run([point[0]*1.0/point_scale for point in mpc_ref_points],
+                                             [point[1]*1.0/point_scale for point in mpc_ref_points],
                                              speed)
         result_dict = json.loads(predict_result)
 
@@ -692,10 +700,10 @@ class AutoDrive(object):
             r_lower_bound = (0, 43, 46)
             b_upper_bound = (150, 255, 255)
             b_lower_bound = (90, 50, 50)
-            ImageProcessor.mpc_control_by_color(blur, r_lower_bound, r_upper_bound)
+            ImageProcessor.mpc_control_by_color(blur, r_lower_bound, r_upper_bound, self.debug)
         else:
             track_img = ImageProcessor.preprocess(src_img, .25)
-            current_angle = ImageProcessor.find_steering_angle_by_line(track_img, last_steering_angle, debug = self.debug)
+            current_angle = ImageProcessor.find_steering_angle_by_line(track_img, last_steering_angle, debug=self.debug)
             track_img = ImageProcessor.preprocess(src_img, .25)
             ImageProcessor.mpc_control_by_line(track_img)
 
@@ -742,12 +750,12 @@ class Car(object):
         speed = float(dashboard["speed"])
         img = ImageProcessor.bgr2rgb(np.asarray(Image.open(BytesIO(base64.b64decode(dashboard["image"])))))
         del dashboard["image"]
-        print datetime.now(), dashboard;
+        # print(datetime.now(), dashboard)
         total_time = float(dashboard["time"])
         elapsed = total_time
 
         if elapsed > 600:
-            print "elapsed: " + str(elapsed)
+            print("elapsed: " + str(elapsed))
             send_restart()
 
         info = {
