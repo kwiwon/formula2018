@@ -365,7 +365,6 @@ class PID:
         self._p_value = error
         self._i_value = min(max(error * d_time, -self._max_integral), self._max_integral)
         self._d_value = d_error / d_time if d_time > 0 else 0.0
-        #v if 1.7 < abs(angle_value) < 4.5
         if len(self.steering_variant) >= 3:
             probability = self.stability_of_wheel_2(
                 self.steering_variant[(len(self.steering_variant) - 3):len(self.steering_variant)])
@@ -994,7 +993,7 @@ class AutoDrive(object):
         # cur_radian, line_results = self.m_twQTeamImageProcessor.findSteeringAngle(src_img, proc_img)
 
         current_angle = ImageProcessor.find_steering_angle_by_color(track_img, last_steering_angle,
-                                                                                       debug=self.debug)
+                                                                    debug=self.debug)
         # current_angle = ImageProcessor.find_steering_angle_by_line(track_img, last_steering_angle, debug = self.debug)
         steering_angle, Kp, Ki, Kd = self._steering_pid.update(-current_angle, -current_angle)  # Current angle
         throttle, _, _, _ = self._throttle_pid.update(-current_angle, speed)  # current speed
@@ -1194,6 +1193,8 @@ if __name__ == "__main__":
     drive = AutoDrive(car, car_training_data_collector, args.record)
 
     last_telemetry = None
+
+
     @sio.on('telemetry')
     def telemetry(sid, dashboard):
         global last_telemetry
