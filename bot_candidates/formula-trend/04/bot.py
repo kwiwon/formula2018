@@ -997,8 +997,6 @@ class AutoDrive(object):
         # current_angle = ImageProcessor.find_steering_angle_by_line(track_img, last_steering_angle, debug = self.debug)
         steering_angle, Kp, Ki, Kd = self._steering_pid.update(-current_angle, -current_angle)  # Current angle
         throttle, _, _, _ = self._throttle_pid.update(-current_angle, speed)  # current speed
-        message = str(info["lap"]) + "," + str(steering_angle) + "," + str(Kp) + "," + str(Ki) + "," + str(Kd) + ","
-        message += str(throttle)
         if info["lap"] > self.current_lap:
             self.current_lap = info["lap"]
             self._steering_pid.pid_reset()
@@ -1009,13 +1007,14 @@ class AutoDrive(object):
         seconds = float(total_time.pop()) if len(total_time) > 0 else 0.0
         minutes = int(total_time.pop()) if len(total_time) > 0 else 0
         hours = int(total_time.pop()) if len(total_time) > 0 else 0
-        elapsed = ((hours * 60) + minutes) * 60 + seconds
+        # elapsed = ((hours * 60) + minutes) * 60 + seconds
         # if hours==0 and minutes==0 and seconds==0:
         #     ImageProcessor.switch_color(ImageProcessor.AUTO_DETECT)
         #     ImageProcessor.ALREADY_TRANSED=False
         #     ImageProcessor.current_step = 0
         #     ImageProcessor.is_translating = False
-        self.car_training_data_collector.save_data_direct(message)
+        self.car_training_data_collector.save_data_direct(
+            "{},{},{},{},{},{}".format(info["lap"], steering_angle, Kp, Ki, Kd, throttle))
         # debug and save captured images
         if self.debug:
             ImageProcessor.show_image(src_img, "source")
@@ -1055,8 +1054,8 @@ class AutoDrive(object):
 
         # consider speed < 0.1 sort of crash
         if speed < 0.1:
-            self._crash = self._crash + 1
-        elif self._recover_mode == 0 and speed >= 0.3:
+            self._crash += 1
+        elif not self._recover_mode and speed >= 0.3:
             self._crash = 0
 
         # it can be 5 or even shorter, depending on your bot behavior
@@ -1103,7 +1102,7 @@ class AutoDrive(object):
         else:
             # print("recovering")
             recover_steering = self._recover_steering
-            recover_throttle = -0.3
+            recover_throttle = -1
 
         return recover_steering, recover_throttle
 
