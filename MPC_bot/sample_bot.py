@@ -640,8 +640,14 @@ class ImageProcessor(object):
                                                  pre_point=pre_point)
             if point:
                 point = (point[0], point[1] + start_y)
+
+                # If there's a point with the same y-value
+                if ref_points and point[1] == ref_points[-1][1]:
+                    point = (point[0], point[1] - 1)
+
                 ref_points.append(point)
                 pre_point = point
+
             image_height -= shift
             if step_scale > step_scale:
                 step_scale -= step_scale
@@ -745,26 +751,22 @@ class AutoDrive(object):
             track_img = ImageProcessor.preprocess(src_img)
             ref_points = ImageProcessor.mpc_control_by_line(track_img)
             src_img = copy.copy(track_img)
-            if self.debug:
-                print("ref_points: %s " % ref_points)
+
+        if self.debug:
+            print("ref_points: %s " % ref_points)
 
         image_height = src_img.shape[0]
         image_width = src_img.shape[1]
         camera_point = (image_width / 2, 0)
         mpc_ref_points = []
-
-        if len(ref_points) >= 3:
-            for point in ref_points:
-                mpc_ref_point = (image_height - point[1], camera_point[0] - point[0])
-                mpc_ref_points.append(mpc_ref_point)
-            point_scale = 5
-            predict_result = self._mpc_model.run([point[0]*1.0/point_scale for point in mpc_ref_points],
-                                                 [point[1]*1.0/point_scale for point in mpc_ref_points],
-                                                 speed)
-            result_dict = json.loads(predict_result)
-        else:
-            predict_result = None
-            result_dict = None
+        for point in ref_points:
+            mpc_ref_point = (image_height - point[1], camera_point[0] - point[0])
+            mpc_ref_points.append(mpc_ref_point)
+        point_scale = 5
+        predict_result = self._mpc_model.run([point[0] * 1.0 / point_scale for point in mpc_ref_points],
+                                             [point[1] * 1.0 / point_scale for point in mpc_ref_points],
+                                             speed)
+        result_dict = json.loads(predict_result)
 
         if self.debug:
             for i in range(len(ref_points)):
