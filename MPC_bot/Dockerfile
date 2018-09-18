@@ -3,7 +3,7 @@ FROM python:2.7
 
 # Install necessary packages
 RUN apt-get update
-RUN apt-get install -y python-opencv cppad coinor-libipopt-dev
+RUN apt-get install -y python-opencv cppad coinor-libipopt-dev libuv1-dev libssl-dev gcc g++ cmake make
 
 # cleanup
 RUN apt-get clean
