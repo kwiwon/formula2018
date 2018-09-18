@@ -704,6 +704,8 @@ class AutoDrive(object):
         self._throttle_pid.assign_set_point(self.DEFAULT_SPEED)
         self._steering_history = []
         self._throttle_history = []
+        self._last_steering_history = 0
+        self._last_throttle_history = 0
         self._car = car
         self._car.register(self)
         self._mpc_model = MPC(mpc_library_path, mpc_settings_path, debug=self.debug)
@@ -750,14 +752,19 @@ class AutoDrive(object):
         image_width = src_img.shape[1]
         camera_point = (image_width / 2, 0)
         mpc_ref_points = []
-        for point in ref_points:
-            mpc_ref_point = (image_height - point[1], camera_point[0] - point[0])
-            mpc_ref_points.append(mpc_ref_point)
-        point_scale = 5
-        predict_result = self._mpc_model.run([point[0]*1.0/point_scale for point in mpc_ref_points],
-                                             [point[1]*1.0/point_scale for point in mpc_ref_points],
-                                             speed)
-        result_dict = json.loads(predict_result)
+
+        if len(ref_points) >= 3:
+            for point in ref_points:
+                mpc_ref_point = (image_height - point[1], camera_point[0] - point[0])
+                mpc_ref_points.append(mpc_ref_point)
+            point_scale = 5
+            predict_result = self._mpc_model.run([point[0]*1.0/point_scale for point in mpc_ref_points],
+                                                 [point[1]*1.0/point_scale for point in mpc_ref_points],
+                                                 speed)
+            result_dict = json.loads(predict_result)
+        else:
+            predict_result = None
+            result_dict = None
 
         if self.debug:
             for i in range(len(ref_points)):
@@ -777,7 +784,9 @@ class AutoDrive(object):
             self._car.control(steering_angle, throttle)
         else:
             if predict_result:
-                self._car.control(result_dict['steering_angle'], result_dict['throttle'])
+                self._last_steering_history = result_dict['steering_angle']
+                self._last_throttle_history = result_dict['throttle']
+            self._car.control(self._last_steering_history, self._last_throttle_history)
 
         self.record_image(src_img)
 
