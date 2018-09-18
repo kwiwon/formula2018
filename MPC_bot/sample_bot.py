@@ -17,19 +17,25 @@ import cv2
 import math
 import numpy as np
 import base64
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import logging
 from ctypes import *
 from enum import Enum
 import json
 import copy
+from sys import platform
 
 
 class MPC_MODE(Enum):
     mpc_control_by_line = 0
     mpc_control_by_color = 1
 
-mpc_library_path = "./libmpc_linux.so"
+if platform == "linux" or platform == "linux2":
+    mpc_library_path = "./libmpc_linux.so"
+elif platform == "darwin":
+    mpc_library_path = "./libmpc_mac.so"
+elif platform == "win32":
+    pass
 mpc_settings_path = "./mpc_config.json"
 
 USE_MPC = True
@@ -890,7 +896,7 @@ class AutoDrive(object):
         else:
             # print("recovering")
             recover_steering = self._recover_steering
-            recover_throttle = -0.3
+            recover_throttle = -1
 
         return recover_steering, recover_throttle
 
