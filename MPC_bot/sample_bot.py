@@ -48,12 +48,12 @@ class CHANGE_TRACK_BY(Enum):
 if "MPC_LIBRARY_PATH" in os.environ:
     mpc_library_path = os.environ["MPC_LIBRARY_PATH"]
 else:
-    mpc_library_path = "sharelibrary-mpc/build/CMakeFiles/mpc.dir/src/mpc.so.1.0"
+    mpc_library_path = "./libmpc_mac.so"
 
 if "MPC_CONFIG_PATH" in os.environ:
     mpc_settings_path = os.environ["MPC_CONFIG_PATH"]
 else:
-    mpc_settings_path = "sharelibrary-mpc/mpc_config_1_7.json"
+    mpc_settings_path = "./mpc_config.json"
 
 USE_MPC = True
 REF_LINE = None  # type command "python sample_bot.py -h" to see help, default is MPC_MODE.mpc_control_by_color
