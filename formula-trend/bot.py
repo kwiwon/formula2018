@@ -8,7 +8,7 @@ import socketio
 from flask import Flask
 
 from behavior_cloning.drive import BeCar
-#  from pid.drive_pid import PIDCar, create_pid_driver
+# from pid.drive_pid import PIDCar, create_pid_driver
 
 sio = socketio.Server()
 
@@ -29,7 +29,7 @@ def connect(sid, environ):
 
 
 def send_control(steering_angle, throttle):
-    print(steering_angle, throttle)
+    # print(steering_angle, throttle)
     sio.emit("steer", data={
         'steering_angle': str(steering_angle),
         'throttle': str(throttle)
