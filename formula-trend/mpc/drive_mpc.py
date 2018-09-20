@@ -7,42 +7,42 @@
 #
 from __future__ import print_function
 
-from time import time, sleep
-from PIL import Image
-from io import BytesIO
-
-# import datetime
-import os
-import cv2
-import math
-import numpy as np
+import argparse
 import base64
-# import matplotlib.pyplot as plt
-import logging
-from ctypes import *
-from enum import Enum
-import json
 import copy
+import json
+import math
+import os
+# import datetime
+# import matplotlib.pyplot as plt
+from ctypes import *
+from io import BytesIO
 from sys import platform
+from time import time
+
+import cv2
+import eventlet.wsgi
+import numpy as np
+import socketio
+from PIL import Image
+from enum import Enum
+from flask import Flask
+
+from interface.car import Car
 
 
 class MPC_MODE(Enum):
     mpc_control_by_line = 0
     mpc_control_by_color = 1
 
-if platform == "linux" or platform == "linux2":
-    mpc_library_path = "./libmpc_linux.so"
-elif platform == "darwin":
-    mpc_library_path = "./libmpc_mac.so"
-elif platform == "win32":
-    pass
-mpc_settings_path = "./mpc_config.json"
 
 USE_MPC = True
 REF_LINE = None
 
+
 def logit(msg):
     print("%s" % msg)
+
 
 class MPC(object):
     def __init__(self, lib_path, model_settings_path, debug=False):
@@ -60,6 +60,7 @@ class MPC(object):
         if self.debug:
             print(res)
         return res
+
 
 class PID:
     def __init__(self, Kp, Ki, Kd, max_integral, min_interval=0.001, set_point=0.0, last_time=None):
@@ -707,7 +708,7 @@ class AutoDrive(object):
 
     debug = False
 
-    def __init__(self, car, record_folder=None):
+    def __init__(self, mpc_library_path, mpc_settings_path, record_folder=None, do_sign_detection=True):
         self._record_folder = record_folder
         self._steering_pid = PID(Kp=self.STEERING_PID_Kp, Ki=self.STEERING_PID_Ki, Kd=self.STEERING_PID_Kd,
                                  max_integral=self.STEERING_PID_max_integral)
@@ -718,8 +719,7 @@ class AutoDrive(object):
         self._throttle_history = []
         self._last_steering_history = 0
         self._last_throttle_history = 0
-        self._car = car
-        self._car.register(self)
+
         self._mpc_model = MPC(mpc_library_path, mpc_settings_path, debug=self.debug)
 
         self.angle_before_hit_wall = 0
@@ -732,9 +732,9 @@ class AutoDrive(object):
 
     def on_dashboard(self, src_img, last_steering_angle, speed, throttle, info):
         if USE_MPC:
-            self.on_dashboard_mpc(src_img, last_steering_angle, speed, throttle, info)
+            return self.on_dashboard_mpc(src_img, last_steering_angle, speed, throttle, info)
         else:
-            self.on_dashboard_pid(src_img, last_steering_angle, speed, throttle, info)
+            return self.on_dashboard_pid(src_img, last_steering_angle, speed, throttle, info)
 
     def on_dashboard_mpc(self, src_img, last_steering_angle, speed, throttle, info):
 
@@ -786,17 +786,19 @@ class AutoDrive(object):
                 cv2.circle(src_img, (int(x), int(y)), 5, (0, 255, 0))
             ImageProcessor.show_image(src_img, "source")
 
+        # Handle crash accident
         crashed = self.crash_detector(speed)
         if crashed:
-            steering_angle, throttle = self.crash_recover(src_img, speed)
-            self._car.control(steering_angle, throttle)
+            new_steering_angle, new_throttle = self.crash_recover(src_img, speed)
         else:
             if predict_result:
                 self._last_steering_history = result_dict['steering_angle']
                 self._last_throttle_history = result_dict['throttle']
-            self._car.control(self._last_steering_history, self._last_throttle_history)
+            new_steering_angle, new_throttle = self._last_steering_history, self._last_throttle_history
 
         self.record_image(src_img)
+
+        return new_steering_angle, new_throttle
 
     def on_dashboard_pid(self, src_img, last_steering_angle, speed, throttle, info):
         track_img = current_angle = None
@@ -837,8 +839,17 @@ class AutoDrive(object):
         self._throttle_history.append(throttle)
         self._throttle_history = self._throttle_history[-self.MAX_THROTTLE_HISTORY:]
 
-        self._car.control(sum(self._steering_history) / self.MAX_STEERING_HISTORY,
-                          sum(self._throttle_history) / self.MAX_THROTTLE_HISTORY)
+        # Handle crash accident
+        crashed = self.crash_detector(speed)
+        if crashed:
+            new_steering_angle, new_throttle = self.crash_recover(src_img, speed)
+        else:
+            new_steering_angle = sum(self._steering_history) / self.MAX_STEERING_HISTORY
+            new_throttle = sum(self._throttle_history) / self.MAX_THROTTLE_HISTORY
+
+        self.record_image(src_img)
+
+        return new_steering_angle, new_throttle
 
     def crash_detector(self, speed):
         """
@@ -901,14 +912,10 @@ class AutoDrive(object):
         return recover_steering, recover_throttle
 
 
-class Car(object):
+class MpcCar(Car):
     MAX_STEERING_ANGLE = 40.0
 
-    def __init__(self, control_function):
-        self._driver = None
-        self._control_function = control_function
-
-    def register(self, driver):
+    def __init__(self, driver):
         self._driver = driver
 
     def on_dashboard(self, dashboard):
@@ -923,33 +930,42 @@ class Car(object):
         total_time = float(dashboard["time"])
         elapsed = total_time
 
-        if elapsed > 600:
-            print("elapsed: " + str(elapsed))
-            send_restart()
-
         info = {
             "lap": int(dashboard["lap"]) if "lap" in dashboard else 0,
             "elapsed": elapsed,
             "status": int(dashboard["status"]) if "status" in dashboard else 0,
         }
-        self._driver.on_dashboard(img, last_steering_angle, speed, throttle, info)
+        new_steering_angle, new_throttle = self._driver.on_dashboard(img, last_steering_angle, speed, throttle, info)
 
-    def control(self, steering_angle, throttle):
-        # convert the values with proper units
-        steering_angle = min(max(ImageProcessor.rad2deg(steering_angle), -Car.MAX_STEERING_ANGLE),
-                             Car.MAX_STEERING_ANGLE)
-        self._control_function(steering_angle, throttle)
+        new_steering_angle = min(max(ImageProcessor.rad2deg(new_steering_angle), -MpcCar.MAX_STEERING_ANGLE),
+                                 MpcCar.MAX_STEERING_ANGLE)
+
+        return new_steering_angle, new_throttle
+
+
+def create_mpc_driver(lib_dir, ref_line='color', record_folder=None, do_sign_detection=True):
+    global REF_LINE
+
+    print("MPC mode is %s" % ref_line)
+    REF_LINE = MPC_MODE.mpc_control_by_color if (ref_line == 'color') else MPC_MODE.mpc_control_by_line
+
+    mpc_library_path, mpc_settings_path = get_model_path(lib_dir)
+    return AutoDrive(mpc_library_path, mpc_settings_path, record_folder, do_sign_detection)
+
+
+def get_model_path(root_dir):
+    if platform == "linux" or platform == "linux2":
+        mpc_library_path = os.path.join(root_dir, "./libmpc_linux.so")
+    elif platform == "darwin":
+        mpc_library_path = os.path.join(root_dir, "./libmpc_mac.so")
+    else:
+        mpc_library_path = None
+    mpc_settings_path = os.path.join(root_dir, "./mpc_config.json")
+
+    return mpc_library_path, mpc_settings_path
 
 
 if __name__ == "__main__":
-    import shutil
-    import argparse
-    from datetime import datetime
-
-    import socketio
-    import eventlet
-    import eventlet.wsgi
-    from flask import Flask
 
     parser = argparse.ArgumentParser(description='AutoDriveBot')
     parser.add_argument(
@@ -969,17 +985,17 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # Input arguments
     if args.record:
         if not os.path.exists(args.record):
             os.makedirs(args.record)
         logit("Start recording images to %s..." % args.record)
 
-    if args.mpc_mode:
-        REF_LINE = MPC_MODE.mpc_control_by_color if (args.mpc_mode == 'color') else MPC_MODE.mpc_control_by_line
-        print("MPC mode is %s" % args.mpc_mode)
+    # Create car with MPC driver
+    driver = create_mpc_driver(lib_dir=os.getcwd(), ref_line=args.mpc_mode, record_folder=args.record)
+    car = MpcCar(driver=driver)
 
     sio = socketio.Server()
-
 
     def send_control(steering_angle, throttle):
         sio.emit(
@@ -990,30 +1006,23 @@ if __name__ == "__main__":
             },
             skip_sid=True)
 
-
     def send_restart():
         sio.emit(
             "restart",
             data={},
             skip_sid=True)
 
-
-    car = Car(control_function=send_control)
-    drive = AutoDrive(car, args.record)
-
-
     @sio.on('telemetry')
     def telemetry(sid, dashboard):
         if dashboard:
-            car.on_dashboard(dashboard)
+            steering_angle, throttle = car.on_dashboard(dashboard)
+            send_control(steering_angle, throttle)
         else:
             sio.emit('manual', data={}, skip_sid=True)
 
-
     @sio.on('connect')
     def connect(sid, environ):
-        car.control(0, 0)
-
+        send_control(0, 0)
 
     app = socketio.Middleware(sio, Flask(__name__))
     eventlet.wsgi.server(eventlet.listen(('', 4567)), app)

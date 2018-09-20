@@ -9,6 +9,7 @@ from flask import Flask
 
 from behavior_cloning.drive import BeCar
 # from pid.drive_pid import PIDCar, create_pid_driver
+# from mpc.drive_mpc import MpcCar, create_mpc_driver
 
 sio = socketio.Server()
 
@@ -42,6 +43,9 @@ if __name__ == '__main__':
 
     # Create car of behavior cloning model
     car = BeCar(model_path=path.join(getcwd(), "behavior_cloning", "model.json"))
+
+    # Create MPC car
+    # car = MpcCar(driver=create_mpc_driver(lib_dir=path.join(getcwd(), "mpc")))
 
     # wrap Flask application with engineio's middleware
     app = socketio.Middleware(sio, Flask(__name__))
