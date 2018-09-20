@@ -9,7 +9,7 @@ from keras.utils import np_utils
 from matplotlib import pyplot as plt
 
 
-DETECT_INTER = 5
+DETECT_INTER = 1
 IMAGE_SIZE = 80
 model_path = os.path.join(os.getcwd(), 'traffic_sign', 'model5_cut32_20.h5')
 classes = {'None': 0,
