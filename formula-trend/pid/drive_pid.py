@@ -900,7 +900,10 @@ class ImageProcessor(object):
         return move_forward, px
 
     @staticmethod
-    def find_steering_angle_by_color(img, last_steering_angle, debug=True):
+    def find_steering_angle_by_color(img, last_steering_angle, debug=True, traffic_sign=None):
+        if debug:
+            ImageProcessor.show_image(img, "Track Image")
+
         r, g, b = cv2.split(img)
         image_height = img.shape[0]
         image_width = img.shape[1]
@@ -909,8 +912,27 @@ class ImageProcessor(object):
         sr, sg, sb = r[image_sample, :], g[image_sample, :], b[image_sample, :]  # sampling
         track_list = [sr, sg, sb]
         tracks = list(map(lambda x: len(x[x > 200]), [sr, sg, sb]))
+
         # Check the left wall or right wall
-        is_left_wall, is_right_wall = ImageProcessor.wall_detection(sr, sg, sb)
+        if traffic_sign in ('ForkLeft', 'ForkRight'):
+            if traffic_sign == 'ForkLeft':
+                if ImageProcessor.right_wall_count >= ImageProcessor.WALL_NOISE:
+                    ImageProcessor.right_wall_count = 0
+                    is_left_wall, is_right_wall = False, True
+                else:
+                    ImageProcessor.right_wall_count += 1
+                    is_left_wall, is_right_wall = False, False
+            else:
+                if ImageProcessor.left_wall_count >= ImageProcessor.WALL_NOISE:
+                    ImageProcessor.left_wall_count = 0
+                    is_left_wall, is_right_wall = True, False
+                else:
+                    ImageProcessor.left_wall_count += 1
+                    is_left_wall, is_right_wall = False, False
+
+            print(traffic_sign, is_left_wall, is_right_wall)
+        else:
+            is_left_wall, is_right_wall = ImageProcessor.wall_detection(sr, sg, sb)
 
         # print("Left wall:{}, Right Wall:{}".format(is_left_wall, is_right_wall))
         # Keep the car in the center color region
@@ -987,6 +1009,10 @@ class AutoDrive(object):
         self._recover_steering = 0.0
 
         self.do_sign_detection = do_sign_detection
+        self.last_detected_sign = None
+        self.acting_new_sign = None
+        self.accumulated_acting_frames = 0
+        self.MAX_ACCUMULATED_ACTING_FRAMES = 15
         if self.do_sign_detection:
             self._sign = identifyTrafficSign()
         else:
@@ -999,12 +1025,38 @@ class AutoDrive(object):
 
         # TODO: Navigate to correct track based on detected traffic sign
         if self.do_sign_detection:
-            trafficSign = self._sign.detect(src_img)
-            if trafficSign is not None and trafficSign != "None":
-                print(trafficSign)
+            traffic_sign = self._sign.detect(src_img)
+            traffic_sign = None if traffic_sign == "None" else traffic_sign
+            if traffic_sign:
+                if self.last_detected_sign != traffic_sign: # We detected a new sign
+                    print("New sign detected:", traffic_sign)
+                    self.acting_new_sign = traffic_sign
+                    self.last_detected_sign = traffic_sign
+
+            if self.acting_new_sign:
+                print("Responding to", self.acting_new_sign)
+
+                if self.acting_new_sign == 'ForkRight':
+                    triangle = np.array([[0, 0],
+                                         [0, int(track_img.shape[0] / 2)],
+                                         [int(track_img.shape[1] / 4), 0]], dtype=np.int32)
+                    cv2.fillConvexPoly(track_img, triangle, 0)
+                elif self.acting_new_sign == 'ForkLeft':
+                    triangle = np.array([[track_img.shape[1], 0],
+                                         [track_img.shape[1], track_img.shape[0]],
+                                         [int(track_img.shape[1] * 2 / 3), track_img.shape[0]],
+                                         [int(track_img.shape[1] / 2), 0]], dtype=np.int32)
+                    cv2.fillConvexPoly(track_img, triangle, 0)
+
+                self.accumulated_acting_frames += 1
+                if self.accumulated_acting_frames >= self.MAX_ACCUMULATED_ACTING_FRAMES:
+                    # TODO: Should consider car speed for response time
+                    self.accumulated_acting_frames = 0
+                    self.acting_new_sign = None
+                    self.last_detected_sign = None
 
         current_angle = ImageProcessor.find_steering_angle_by_color(track_img, last_steering_angle,
-                                                                    debug=self.debug)
+                                                                    debug=self.debug, traffic_sign=self.acting_new_sign)
         # current_angle = ImageProcessor.find_steering_angle_by_line(track_img, last_steering_angle, debug = self.debug)
         steering_angle, Kp, Ki, Kd = self._steering_pid.update(-current_angle, -current_angle)  # Current angle
         throttle, _, _, _ = self._throttle_pid.update(-current_angle, speed)  # current speed
