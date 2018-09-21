@@ -53,7 +53,7 @@ def main(argv):
             bot_type = arg
 
     if bot_type == 'bc':
-        from behavior_cloning.drive import BeCar
+        from behavior_cloning.drive_bc import BeCar
         # Create car of behavior cloning model
         car = BeCar(model_path=path.join(getcwd(), "behavior_cloning", "model.json"))
     elif bot_type == 'mpc':
