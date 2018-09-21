@@ -13,7 +13,7 @@ RUN apt-get clean
   
 # Copy the current directory contents into the container at /app
 RUN mkdir /app
-COPY bot_candidates/formula-trend/05/ /app
+COPY formula-trend/ /app
 
 # install python packages 
 RUN pip install -r /app/requirements.txt
