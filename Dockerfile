@@ -13,7 +13,7 @@ RUN apt-get clean
   
 # Copy the current directory contents into the container at /app
 RUN mkdir /app
-COPY bot_candidates/formula-trend/05/ /app
+COPY formula-trend/ /app
 
 # install python packages 
 RUN pip install -r /app/requirements.txt
@@ -22,4 +22,5 @@ RUN pip install -r /app/requirements.txt
 WORKDIR /app
 
 # Run bot.py when the container launches, you should replace it with your program
-ENTRYPOINT ["python3", "bot.py"]
+# -b specify the bot type, "bc", "pid", "mpc"
+ENTRYPOINT ["python3", "bot.py", "-b", "bc"]
