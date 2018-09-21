@@ -22,4 +22,5 @@ RUN pip install -r /app/requirements.txt
 WORKDIR /app
 
 # Run bot.py when the container launches, you should replace it with your program
-ENTRYPOINT ["python3", "bot.py"]
+# -b specify the bot type, "bc", "pid", "mpc"
+ENTRYPOINT ["python3", "bot.py", "-b", "bc"]
