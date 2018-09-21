@@ -10,6 +10,8 @@
     "ref_epsi": 0,
     "ref_speed": 2.02,
     "weight": {
+        "step_cte": 1,
+        "step_epsi": 0,
         "cte": 40,
         "epsi": 50,
         "speed": 4000,

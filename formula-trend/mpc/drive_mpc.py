@@ -5,17 +5,22 @@
 # Revision:      v1.2
 # Released Date: Aug 20, 2018
 #
-from __future__ import print_function
 
 import argparse
 import base64
 import copy
 import json
+# import matplotlib.pyplot as plt
+import logging
 import math
+# import datetime
 import os
+import sys
+from collections import namedtuple
+from ctypes import *
 # import datetime
 # import matplotlib.pyplot as plt
-from ctypes import *
+from datetime import datetime
 from io import BytesIO
 from sys import platform
 from time import time
@@ -30,35 +35,55 @@ from flask import Flask
 
 from interface.car import Car
 
+# init logger
+logger = logging.getLogger( __name__ )
+
+fh = logging.StreamHandler(sys.stdout)
+formatter = logging.Formatter("%(asctime)s %(levelname)s [%(filename)s:%(lineno)d][%(name)s] %(message)s")
+fh.setFormatter(formatter)
+logger.addHandler(fh)
+
 
 class MPC_MODE(Enum):
     mpc_control_by_line = 0
     mpc_control_by_color = 1
 
 
-USE_MPC = True
-REF_LINE = None
+class DEBUG_MODE(Enum):
+    quiet = 0
+    graph_only = 1
+    graph_and_log = 2
 
 
-def logit(msg):
-    print("%s" % msg)
+class CHANGE_TRACK_BY(Enum):
+    area = 0
+    ref_point = 1
+
+
+REF_LINE = None  # type command "python sample_bot.py -h" to see help, default is MPC_MODE.mpc_control_by_color
+DEBUG = DEBUG_MODE.quiet
+PRE_TRACK_AREA_WEIGHT = 2
+CHANGE_TRACK_MODE = CHANGE_TRACK_BY.ref_point
+
+
+if DEBUG == DEBUG_MODE.graph_and_log:
+    logger.setLevel(logging.DEBUG)
+else:
+    logger.setLevel(logging.WARN)
 
 
 class MPC(object):
-    def __init__(self, lib_path, model_settings_path, debug=False):
+    def __init__(self, lib_path, model_settings_path):
         self.mpc_lib = cdll.LoadLibrary(lib_path)
         self.mpc_lib.ChangeSettings(c_char_p(model_settings_path))
-        self.debug = debug
 
     def run(self, ptsx, ptsy, v):
         telemetry = {"ptsx": ptsx, "ptsy": ptsy, "speed": v}
-        if self.debug:
-            print(telemetry)
+        logger.debug(telemetry)
         # self.mpc_lib.Predict.argtypes = [c_char_p]
         self.mpc_lib.Predict.restype = c_char_p
         res = self.mpc_lib.Predict(c_char_p(json.dumps(telemetry)))
-        if self.debug:
-            print(res)
+        logger.debug(res)
         return res
 
 
@@ -273,83 +298,6 @@ class ImageProcessor(object):
         return matched
 
     @staticmethod
-    def mask_frame_color(frame, min_values, max_values):
-        """
-        Mask a frame by RGB color
-        """
-
-        min_th_ok = np.all(frame > min_values, axis=2)
-        max_th_ok = np.all(frame < max_values, axis=2)
-
-        out = np.logical_and(min_th_ok, max_th_ok)
-
-        return out
-
-    @staticmethod
-    def binarize(img):
-        """
-        Convert an input frame to a binary image
-        :param img: input color frame
-        :param verbose: if True, show intermediate results
-        :return: binarized frame
-        """
-        B_min = np.array([100, 0, 0])
-        B_max = np.array([255, 150, 150])
-
-        G_min = np.array([0, 100, 0])
-        G_max = np.array([150, 255, 150])
-
-        R_min = np.array([0, 0, 100])
-        R_max = np.array([150, 150, 255])
-
-        h, w = img.shape[:2]
-        binary = np.zeros(shape=(h, w), dtype=np.uint8)
-
-        B_mask = ImageProcessor.mask_frame_color(img, B_min, B_max)
-        binary = np.logical_or(binary, B_mask)
-
-        G_mask = ImageProcessor.mask_frame_color(img, G_min, G_max)
-        binary = np.logical_or(binary, G_mask)
-
-        R_mask = ImageProcessor.mask_frame_color(img, R_min, R_max)
-        binary = np.logical_or(binary, R_mask)
-
-        # get Sobel binary mask (thresholded gradients)
-        # sobel_mask = mask_frame_sobel(img, kernel_size=9)
-        # binary = np.logical_or(binary, sobel_mask)
-
-        # apply a light morphology to "fill the gaps" in the binary image
-        kernel = np.ones((5, 5), np.uint8)
-        closing = cv2.morphologyEx(binary.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
-
-        return closing
-
-    @staticmethod
-    def check_recovery_direction(img):
-        """
-        check if we should move forward or backward. also check if we hit right wall or left wall
-        """
-        move_forward = False
-        px = 0
-        # use only a 10-pixel slice to enhance performance. 150~160 is based on experience.
-        part = slice(150, 160)
-        section = img[part, :]
-
-        # turn RGB images into binary images
-        section = ImageProcessor.binarize(section)
-        _y, _x = np.where(section == 1)
-        len_x = len(_x)
-        # if there is no obstacle/wall ahead, move forward, else backward
-        if len_x > 3000:
-            move_forward = True
-
-        # if px > 160, it should be left wall. otherwise, right wall.
-        if len_x > 500:
-            px = np.mean(_x)
-
-        return move_forward, px
-
-    @staticmethod
     def find_steering_angle_by_line(img, last_steering_angle, debug=True):
         steering_angle = 0.0
         lines = ImageProcessor.find_lines(img)
@@ -396,7 +344,7 @@ class ImageProcessor(object):
             cv2.line(img, best_coord[:2], best_coord[2:], (0, 255, 255), 2)
 
         if abs(best_thetaB - np.pi / 2) <= tolerance and abs(best_thetaA - best_thetaB) >= np.pi / 4:
-            print("*** sharp turning")
+            # Sharp turning
             best_x1, best_y1, best_x2, best_y2 = best_coord
             f = lambda x: int(
                 ((float(best_y2) - float(best_y1)) / (float(best_x2) - float(best_x1)) * (x - float(best_x1))) + float(
@@ -440,7 +388,7 @@ class ImageProcessor(object):
             x = image_width / 2 + int(r * math.cos(steering_angle))
             y = image_height - int(r * math.sin(steering_angle))
             cv2.line(img, (image_width / 2, image_height), (x, y), (255, 0, 255), 2)
-            logit("line angle: %0.2f, steering angle: %0.2f, last steering angle: %0.2f" % (
+            logger.debug("line angle: %0.2f, steering angle: %0.2f, last steering angle: %0.2f" % (
             ImageProcessor.rad2deg(best_thetaA), ImageProcessor.rad2deg(np.pi / 2 - steering_angle),
             ImageProcessor.rad2deg(np.pi / 2 - last_steering_angle)))
 
@@ -473,7 +421,7 @@ class ImageProcessor(object):
             x = image_width / 2 + int(r * math.cos(steering_angle))
             y = image_height - int(r * math.sin(steering_angle))
             cv2.line(img, (image_width / 2, image_height), (x, y), (255, 0, 255), 2)
-            logit("steering angle: %0.2f, last steering angle: %0.2f" % (
+            logger.debug("steering angle: %0.2f, last steering angle: %0.2f" % (
             ImageProcessor.rad2deg(steering_angle), ImageProcessor.rad2deg(np.pi / 2 - last_steering_angle)))
 
         return (np.pi / 2 - steering_angle) * 2.0
@@ -538,7 +486,7 @@ class ImageProcessor(object):
             trajectory.append(best)
             cv2.line(img, best_coord[:2], best_coord[2:], (255, 255, 0), 5)  # (0, 255, 255)
             if debug:
-                logit("*** trajectory line --- distance: %f, length: %f, line: %s, thetaA: %d, thetaB: %d" % (
+                logger.debug("*** trajectory line --- distance: %f, length: %f, line: %s, thetaA: %d, thetaB: %d" % (
                 best_distance, best_length, best_coord, ImageProcessor.rad2deg(best_thetaA), ImageProcessor.rad2deg(best_thetaB)))
             x1, y1, x2, y2 = best_coord
             base_x, base_y = (x1, y1) if y1 < y2 else (x2, y2)
@@ -627,21 +575,15 @@ class ImageProcessor(object):
         return result_point
 
     @staticmethod
-    def find_mpc_ref_points(img, init_point, lower_hsv, upper_hsv, debug=False):
+    def find_mpc_ref_points(img, init_point):
         image_height = img.shape[0]
-        shift = 10
-        step_scale = 5
+        shift = 15
 
         ref_points = []
         pre_point = init_point
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, np.array(lower_hsv), np.array(upper_hsv))
-        if debug:
-            ImageProcessor.show_image(mask, 'mask')
-        while image_height > int(image_height * 0.2):
-            start_y = (image_height - shift)
-            src = mask[start_y: start_y + 30]
-            image_height -= shift
+        start_y = image_height
+        while start_y > int(image_height * 0.5):
+            src = img[start_y: start_y + 5]
             center_points = ImageProcessor.find_center_points(src)
             point = ImageProcessor.filter_points(candidate_points=center_points,
                                                  pre_point=pre_point)
@@ -655,22 +597,39 @@ class ImageProcessor(object):
                 ref_points.append(point)
                 pre_point = point
 
-            image_height -= shift
-            if step_scale > step_scale:
-                step_scale -= step_scale
+            start_y -= shift
         return ref_points
 
     @staticmethod
-    def mpc_control_by_color(img, lower_hsv, upper_hsv, debug=False):
-        ref_points = ImageProcessor.find_mpc_ref_points(img=img,
-                                                        init_point=(img.shape[1] / 2, 0),
-                                                        lower_hsv=lower_hsv,
-                                                        upper_hsv=upper_hsv,
-                                                        debug=debug)
+    def get_max_area_by_color(img, lower_hsv, upper_hsv):
+        blur_img = cv2.blur(img, (10, 10))
+        hsv = cv2.cvtColor(blur_img, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv, np.array(lower_hsv), np.array(upper_hsv))
+        (_, contours, _) = cv2.findContours(mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        max_area = 0
+        max_cnt = 0
+        for i in range(len(contours)):
+            cnt = contours[i]
+            area = cv2.contourArea(cnt)
+            if (area > max_area):
+                if (max_area != 0):
+                    c_min = []
+                    c_min.append(max_cnt)
+                    cv2.drawContours(mask, c_min, -1, (0, 0, 0), cv2.FILLED)
+                max_area = area
+                max_cnt = cnt
+            else:
+                c_min = []
+                c_min.append(cnt)
+                cv2.drawContours(mask, c_min, -1, (0, 0, 0), cv2.FILLED)
+        return max_area, mask
 
+    @staticmethod
+    def mpc_control_by_color(img):
+        ref_points = ImageProcessor.find_mpc_ref_points(img=img,
+                                                        init_point=(img.shape[1] / 2, 0))
         return ref_points
 
-    cache_points = []
     @staticmethod
     def mpc_control_by_line(img):
         # img is track_img
@@ -706,7 +665,17 @@ class AutoDrive(object):
     MAX_THROTTLE_HISTORY = 3
     DEFAULT_SPEED = 0.5
 
-    debug = False
+    CRASH_THRESHOLD = 5
+
+    class TrackColor:
+        RED = 0
+        GREEN = 1
+        BLUE = 2
+
+    class CrashMode:
+        OnLeftHandSide = 0
+        OnRightHandSide = 1
+        Obstacle = 2
 
     def __init__(self, mpc_library_path, mpc_settings_path, record_folder=None, do_sign_detection=True):
         self._record_folder = record_folder
@@ -717,199 +686,244 @@ class AutoDrive(object):
         self._throttle_pid.assign_set_point(self.DEFAULT_SPEED)
         self._steering_history = []
         self._throttle_history = []
-        self._last_steering_history = 0
-        self._last_throttle_history = 0
 
-        self._mpc_model = MPC(mpc_library_path, mpc_settings_path, debug=self.debug)
+        self._track_history = None
 
-        self.angle_before_hit_wall = 0
-        self.hit_wall = False
+        self._mpc_model = MPC(mpc_library_path, mpc_settings_path)
+        self._record_references = []
 
-        self._crash = 0
-        self._record_images = []
-        self._recover_mode = 0
-        self._recover_steering = 0.0
+        self.crashed = False
+        self.crash_mode = None
+        self.crash_color = None
+        self.recover_steering_angle = 0
+        self.recover_throttle = 0.2
+        self.low_speed = 0
+
+        if DEBUG == DEBUG_MODE.quiet:
+            self.show_graph = False
+        else:
+            self.show_graph = True
 
     def on_dashboard(self, src_img, last_steering_angle, speed, throttle, info):
-        if USE_MPC:
-            return self.on_dashboard_mpc(src_img, last_steering_angle, speed, throttle, info)
-        else:
-            return self.on_dashboard_pid(src_img, last_steering_angle, speed, throttle, info)
+        return self.on_dashboard_mpc(src_img, last_steering_angle, speed, throttle, info)
 
     def on_dashboard_mpc(self, src_img, last_steering_angle, speed, throttle, info):
+        Track = namedtuple('Track', 'color color_upper_bound color_lower_bound')
+        steering_angle = 0
+        throttle = 0
 
         if REF_LINE == MPC_MODE.mpc_control_by_color:
             r_upper_bound = (10, 255, 255)
             r_lower_bound = (0, 43, 46)
             b_upper_bound = (150, 255, 255)
             b_lower_bound = (90, 50, 50)
-            ref_points = ImageProcessor.mpc_control_by_color(cv2.blur(src_img, (10, 10)), b_lower_bound, b_upper_bound,
-                                                             self.debug)
+            g_upper_bound = (77, 255, 255)
+            g_lower_bound = (35, 43, 46)
+            y_upper_bound = (34, 255, 255)
+            y_lower_bound = (30, 43, 46)
+            bl_upper_bound = (180, 255, 46)
+            bl_lower_bound = (0, 0, 0)
+            tracks = [Track(self.TrackColor.RED, r_upper_bound, r_lower_bound),
+                      Track(self.TrackColor.GREEN, g_upper_bound, g_lower_bound),
+                      Track(self.TrackColor.BLUE, b_upper_bound, b_lower_bound)]
+
+            blur = cv2.blur(src_img, (10, 10))
+            max_area = -1
+            max_mask = None
+            pre_track_area = None
+            pre_track_ref_point = None
+            pre_track_mask = None
+            max_track_color = None
+
+            for track in tracks:
+                area, mask = ImageProcessor.get_max_area_by_color(blur, track.color_lower_bound, track.color_upper_bound)
+                if track.color == self._track_history:
+                    pre_track_area = area
+                    pre_track_mask = mask
+                    pre_track_ref_point = ImageProcessor.mpc_control_by_color(pre_track_mask)
+                if area > max_area:
+                    max_mask = mask
+                    max_area = area
+                    max_track_color = track.color
+
+            if CHANGE_TRACK_MODE == CHANGE_TRACK_BY.area:
+                current_mask = max_mask
+                current_track_color = max_track_color
+                if self._track_history and max_track_color != self._track_history and pre_track_area * PRE_TRACK_AREA_WEIGHT > max_area:
+                    current_mask = pre_track_mask
+                    current_track_color = self._track_history
+                self._track_history = current_track_color
+
+                if DEBUG in [DEBUG_MODE.graph_only, DEBUG_MODE.graph_and_log]:
+                    ImageProcessor.show_image(current_mask, 'mask')
+                ref_points = ImageProcessor.mpc_control_by_color(current_mask)
+
+            elif CHANGE_TRACK_MODE == CHANGE_TRACK_BY.ref_point:
+                if not pre_track_ref_point or len(pre_track_ref_point) < 3:
+                    ref_points = ImageProcessor.mpc_control_by_color(max_mask)
+                    self._track_history = max_track_color
+                else:
+                    ref_points = pre_track_ref_point
+
+            self.detect_crash(max_area, max_track_color, speed, blur)
+            if self.crashed:
+                steering_angle, throttle = self.recover_from_crash(blur)
         else:
-            # img = cv2.blur(src_img, (10, 10))
-            # hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-            # kernel_size = 5
-            # blurred = cv2.GaussianBlur(hsv, (kernel_size, kernel_size), 0)
-            # lower_hsv = b_lower_bound = (90, 50, 50)
-            # upper_hsv = b_upper_bound = (150, 255, 255)
-            # mask = cv2.inRange(blurred, np.array(lower_hsv), np.array(upper_hsv))
-            # track_img = cv2.bitwise_and(src_img, src_img, mask=mask)
             track_img = ImageProcessor.preprocess(src_img)
             ref_points = ImageProcessor.mpc_control_by_line(track_img)
             src_img = copy.copy(track_img)
+            logger.debug("ref_points: %s " % ref_points)
 
-        if self.debug:
-            print("ref_points: %s " % ref_points)
+        if not self.crashed:
+            image_height = src_img.shape[0]
+            image_width = src_img.shape[1]
+            camera_point = (image_width / 2, 0)
 
-        image_height = src_img.shape[0]
-        image_width = src_img.shape[1]
-        camera_point = (image_width / 2, 0)
-        mpc_ref_points = []
-        for point in ref_points:
-            mpc_ref_point = (image_height - point[1], camera_point[0] - point[0])
-            mpc_ref_points.append(mpc_ref_point)
-        point_scale = 5
-        predict_result = self._mpc_model.run([point[0] * 1.0 / point_scale for point in mpc_ref_points],
-                                             [point[1] * 1.0 / point_scale for point in mpc_ref_points],
-                                             speed)
-        result_dict = json.loads(predict_result)
+            mpc_ref_points = []
+            for point in ref_points:
+                mpc_ref_point = (image_height - point[1], camera_point[0] - point[0])
+                mpc_ref_points.append(mpc_ref_point)
+            point_scale = 5
+            predict_result = self._mpc_model.run([point[0]*1.0/point_scale for point in mpc_ref_points],
+                                                 [point[1]*1.0/point_scale for point in mpc_ref_points],
+                                                 speed)
+            result_dict = json.loads(predict_result)
+            steering_angle = result_dict['steering_angle']
+            throttle = result_dict['throttle']
 
-        if self.debug:
-            for i in range(len(ref_points)):
-                cv2.circle(src_img, ref_points[i], 5, (0, 0, 255))
-                cv2.putText(src_img, str(mpc_ref_points[i]).decode(), ref_points[i], cv2.FONT_HERSHEY_COMPLEX, 0.3, 255)
-            mpc_x_list = result_dict['mpc_x']
-            mpc_y_list = result_dict['mpc_y']
-            for i in range(len(mpc_x_list)):
-                x = camera_point[0] - mpc_y_list[i] * point_scale
-                y = image_height - mpc_x_list[i] * point_scale
-                cv2.circle(src_img, (int(x), int(y)), 5, (0, 255, 0))
-            ImageProcessor.show_image(src_img, "source")
+            if self.show_graph:
+                for i in range(len(ref_points)):
+                    cv2.circle(src_img, ref_points[i], 5, (0, 0, 255))
+                    cv2.putText(src_img, str(mpc_ref_points[i]).decode(), ref_points[i], cv2.FONT_HERSHEY_COMPLEX, 0.3, 255)
+                mpc_x_list = result_dict['mpc_x']
+                mpc_y_list = result_dict['mpc_y']
+                for i in range(len(mpc_x_list)):
+                    x = camera_point[0] - mpc_y_list[i] * point_scale
+                    y = image_height - mpc_x_list[i] * point_scale
+                    cv2.circle(src_img, (int(x), int(y)), 5, (0, 255, 0))
+                ImageProcessor.show_image(src_img, "source")
 
-        # Handle crash accident
-        crashed = self.crash_detector(speed)
-        if crashed:
-            new_steering_angle, new_throttle = self.crash_recover(src_img, speed)
-        else:
-            if predict_result:
-                self._last_steering_history = result_dict['steering_angle']
-                self._last_throttle_history = result_dict['throttle']
-            new_steering_angle, new_throttle = self._last_steering_history, self._last_throttle_history
+        return steering_angle, throttle
 
-        self.record_image(src_img)
+    def record_references(self, reference):
+        self._record_references.append(reference)
+        self._record_references = self._record_references[-100:]
 
-        return new_steering_angle, new_throttle
-
-    def on_dashboard_pid(self, src_img, last_steering_angle, speed, throttle, info):
-        track_img = current_angle = None
-        if REF_LINE == MPC_MODE.mpc_control_by_color:
-            track_img = ImageProcessor.preprocess(src_img)
-            current_angle = ImageProcessor.find_steering_angle_by_color(track_img, last_steering_angle,
-                                                                        debug=self.debug)
-            blur = cv2.blur(src_img, (10, 10))
-            r_upper_bound = (10, 255, 255)
-            r_lower_bound = (0, 43, 46)
-            b_upper_bound = (150, 255, 255)
-            b_lower_bound = (90, 50, 50)
-            ImageProcessor.mpc_control_by_color(blur, r_lower_bound, r_upper_bound, self.debug)
-        else:
-            track_img = ImageProcessor.preprocess(src_img, .25)
-            current_angle = ImageProcessor.find_steering_angle_by_line(track_img, last_steering_angle, debug=self.debug)
-            track_img = ImageProcessor.preprocess(src_img, .25)
-            ImageProcessor.mpc_control_by_line(track_img)
-
-        steering_angle = self._steering_pid.update(-current_angle)
-        throttle = self._throttle_pid.update(speed)
-
-        if self.debug:
-            ImageProcessor.show_image(src_img, "source")
-            ImageProcessor.show_image(track_img, "track")
-            # logit("steering PID: %0.2f (%0.2f) => %0.2f (%0.2f)" % (current_angle, ImageProcessor.rad2deg(current_angle), steering_angle, ImageProcessor.rad2deg(steering_angle)))
-            # logit("throttle PID: %0.4f => %0.4f" % (speed, throttle))
-            # logit("info: %s" % repr(info))
-
-        if self._record_folder:
-            suffix = "-deg%0.3f" % (ImageProcessor.rad2deg(steering_angle))
-            ImageProcessor.save_image(self._record_folder, src_img, prefix="cam", suffix=suffix)
-            ImageProcessor.save_image(self._record_folder, track_img, prefix="trk", suffix=suffix)
-
-        # smooth the control signals
-        self._steering_history.append(steering_angle)
-        self._steering_history = self._steering_history[-self.MAX_STEERING_HISTORY:]
-        self._throttle_history.append(throttle)
-        self._throttle_history = self._throttle_history[-self.MAX_THROTTLE_HISTORY:]
-
-        # Handle crash accident
-        crashed = self.crash_detector(speed)
-        if crashed:
-            new_steering_angle, new_throttle = self.crash_recover(src_img, speed)
-        else:
-            new_steering_angle = sum(self._steering_history) / self.MAX_STEERING_HISTORY
-            new_throttle = sum(self._throttle_history) / self.MAX_THROTTLE_HISTORY
-
-        self.record_image(src_img)
-
-        return new_steering_angle, new_throttle
-
-    def crash_detector(self, speed):
+    def detect_crash(self, max_track_area, max_track_color, speed, blur):
         """
-        detect if a crash occurred
+            detect if a crash occurred
         """
+
+        YELLOW = 0
+        BLACK = 1
+
+        # HSV of wall
+        y_upper_bound = (34, 255, 255)
+        y_lower_bound = (30, 43, 46)
+        bl_upper_bound = (180, 255, 46)
+        bl_lower_bound = (0, 0, 0)
+        Wall = namedtuple('Wall', 'color color_upper_bound color_lower_bound')
+        walls = [Wall(YELLOW, y_upper_bound, y_lower_bound), Wall(BLACK, bl_upper_bound, bl_lower_bound)]
+
         crash = False
+        wall_color = None
 
-        # consider speed < 0.1 sort of crash
+        # consider as crash if current speed is lower than 0.1 for too long
         if speed < 0.1:
-            self._crash = self._crash + 1
-        elif self._recover_mode == 0 and speed >= 0.3:
-            self._crash = 0
-
-        # it can be 5 or even shorter, depending on your bot behavior
-        if self._crash >= 8:
-            crash = True
-
-        return crash
-
-    def record_image(self, src_img):
-        """
-        record last 100 images for replay. used to detect when a crash hit right wall or left wall
-        """
-
-        self._record_images.append(src_img)
-        self._record_images = self._record_images[-100:]
-
-    def crash_recover(self, src_img, speed):
-        """
-        decide recover steering angle and throttle based on the image replay
-        """
-        self._recover_mode = 1
-
-        # skip calculating recover steering angle if we already have it
-        if self._recover_steering == 0.0:
-            for i in range(1, len(self._record_images)):
-                # replay the recorded images backward. check if the car hit right wall or left wall
-                _, px = ImageProcessor.check_recovery_direction(self._record_images[-i])
-                # px > 165 means left wall. px < 155 means right wall
-                if px > 165:
-                    self._recover_steering = -40
-                    break
-                elif 0 < px < 155:
-                    self._recover_steering = 40
-                    break
-        # check if we should move forward or backward
-        move_forward, px = ImageProcessor.check_recovery_direction(src_img)
-        if move_forward:
-            # print("recovery end")
-            recover_steering = -self._recover_steering
-            recover_throttle = 0.2
-            self._recover_mode = 0
-            self._crash = 0
-            self._recover_steering = 0.0
+            self.low_speed += 1
         else:
-            # print("recovering")
-            recover_steering = self._recover_steering
-            recover_throttle = -1
+            self.low_speed = 0
 
-        return recover_steering, recover_throttle
+        if self.low_speed > self.CRASH_THRESHOLD:
+            logger.warn("Detect crashed! Speed is lower than expected")
+            crash = True
+            self.crash_color = max_track_color
+
+            max_area = max_track_area
+            for wall in walls:
+                wall_area, _ = ImageProcessor.get_max_area_by_color(blur, wall.color_lower_bound, wall.color_upper_bound)
+                if wall_area > max_area:
+                    wall_color = wall.color
+
+        # consider as crash if area of wall is larger than any track
+        for wall in walls:
+            wall_area, _ = ImageProcessor.get_max_area_by_color(blur, wall.color_lower_bound, wall.color_upper_bound)
+            if wall_area > max_track_area:
+                logger.warn("Detect crashed! Wall area larger than track")
+                crash = True
+                self.crash_color = max_track_color
+                wall_color = wall.color
+
+        if crash:
+            self.crashed = True
+
+            if wall_color is None:
+                self.crash_mode = self.CrashMode.Obstacle
+            elif (wall_color == YELLOW and self.crash_color == self.TrackColor.RED) or \
+                    (wall_color == BLACK and self.crash_color == self.TrackColor.GREEN):
+                self.crash_mode = self.CrashMode.OnRightHandSide
+            else:
+                self.crash_mode = self.CrashMode.OnLeftHandSide
+
+    # def detect_crash_by_reference_line(self):
+    #     pass
+
+    def recover_from_crash(self, blur):
+        r_upper_bound = (10, 255, 255)
+        r_lower_bound = (0, 43, 46)
+        b_upper_bound = (150, 255, 255)
+        b_lower_bound = (90, 50, 50)
+        g_upper_bound = (77, 255, 255)
+        g_lower_bound = (35, 43, 46)
+
+        Track = namedtuple('Track', 'color color_upper_bound color_lower_bound')
+        tracks = [Track(self.TrackColor.RED, r_upper_bound, r_lower_bound),
+                  Track(self.TrackColor.GREEN, g_upper_bound, g_lower_bound),
+                  Track(self.TrackColor.BLUE, b_upper_bound, b_lower_bound)]
+
+        max_area = -1
+        max_area_track = None
+
+        for track in tracks:
+            area, _ = ImageProcessor.get_max_area_by_color(blur, track.color_lower_bound, track.color_upper_bound)
+            if area > max_area:
+                max_area = area
+                max_area_track = track.color
+
+        steering_angle = 0
+        throttle = 0
+        if self.crash_mode == self.CrashMode.Obstacle:
+            # TODO Recover from obstacle
+            # For now, just reverse until we detect to follow different track
+
+            if max_area_track != self.crash_color:
+                self.crashed = False
+                self.crash_mode = None
+                self.low_speed = 0
+
+                steering_angle = 0
+                throttle = 0.2
+            else:
+                steering_angle = 0
+                throttle = -0.2
+        else:
+            if max_area_track == self.TrackColor.BLUE:
+                self.crashed = False
+                self.crash_mode = None
+                self.low_speed = 0
+
+                steering_angle = -self.recover_steering_angle
+                self.recover_steering_angle = 0
+                throttle = 0.2
+                self._track_history = self.TrackColor.BLUE
+            elif self.crash_mode == self.CrashMode.OnRightHandSide:
+                steering_angle = self.recover_steering_angle = 40
+                throttle = -0.2
+            else:
+                steering_angle = self.recover_steering_angle = -40
+                throttle = -0.2
+
+        return steering_angle, throttle
 
 
 class MpcCar(Car):
@@ -926,7 +940,7 @@ class MpcCar(Car):
         speed = float(dashboard["speed"])
         img = ImageProcessor.bgr2rgb(np.asarray(Image.open(BytesIO(base64.b64decode(dashboard["image"])))))
         del dashboard["image"]
-        # print(datetime.now(), dashboard)
+        logger.debug("%s %s" % (str(datetime.now()), dashboard))
         total_time = float(dashboard["time"])
         elapsed = total_time
 
@@ -954,6 +968,17 @@ def create_mpc_driver(lib_dir, ref_line='color', record_folder=None, do_sign_det
 
 
 def get_model_path(root_dir):
+    # TODO: Merge them!!
+    # if "MPC_LIBRARY_PATH" in os.environ:
+    #     mpc_library_path = os.environ["MPC_LIBRARY_PATH"]
+    # else:
+    #     mpc_library_path = "./libmpc_mac.so"
+    #
+    # if "MPC_CONFIG_PATH" in os.environ:
+    #     mpc_settings_path = os.environ["MPC_CONFIG_PATH"]
+    # else:
+    #     mpc_settings_path = "./mpc_config.json"
+
     if platform == "linux" or platform == "linux2":
         mpc_library_path = os.path.join(root_dir, "./libmpc_linux.so")
     elif platform == "darwin":
@@ -989,7 +1014,7 @@ if __name__ == "__main__":
     if args.record:
         if not os.path.exists(args.record):
             os.makedirs(args.record)
-        logit("Start recording images to %s..." % args.record)
+        logger.debug("Start recording images to %s..." % args.record)
 
     # Create car with MPC driver
     driver = create_mpc_driver(lib_dir=os.getcwd(), ref_line=args.mpc_mode, record_folder=args.record)
