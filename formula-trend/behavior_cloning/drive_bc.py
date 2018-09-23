@@ -2,11 +2,9 @@
 # -*- coding: utf-8 -*-
 import base64
 import math
-from io import BytesIO
 
 import cv2
 import numpy as np
-from PIL import Image
 from keras.models import model_from_json
 
 from behavior_cloning.train import img_pre_processing
@@ -324,11 +322,9 @@ class BeCar(Car):
         # The current speed of the car
         # speed = data["speed"]
         # The current image from the center camera of the car
-        imgString = data["image"]
-        image = Image.open(BytesIO(base64.b64decode(imgString)))
-        image_array = np.asarray(image)
+        image_rgb = cv2.imdecode(np.fromstring(base64.b64decode(data["image"]), np.uint8), flags=cv2.IMREAD_COLOR)
+        image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
 
-        image_rgb = ImageProcessor.bgr2rgb(image_array)
         is_goback, back_angle = self.go_back(image_rgb)
         if is_goback:
             # Handle car crash
@@ -338,12 +334,7 @@ class BeCar(Car):
             if self.do_sign_detection:
                 detected_sign = self.get_detected_sign(image_rgb)
 
-            img = img_pre_processing(image_array)
-            # import time
-            # from datetime import datetime
-            # timestamp = int(time.mktime(datetime.now().timetuple()))
-            # misc.imsave(str(timestamp)+'.png', img)
-
+            img = img_pre_processing(image_bgr)
             img_batch = img[None, :, :, :].astype('float')
 
             prediction = self.model.predict(img_batch, batch_size=1)

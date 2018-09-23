@@ -21,7 +21,7 @@ from ctypes import *
 # import datetime
 # import matplotlib.pyplot as plt
 from datetime import datetime
-from io import BytesIO
+from enum import Enum
 from sys import platform
 from time import time
 
@@ -29,8 +29,6 @@ import cv2
 import eventlet.wsgi
 import numpy as np
 import socketio
-from PIL import Image
-from enum import Enum
 from flask import Flask
 
 from interface.car import Car
@@ -938,7 +936,7 @@ class MpcCar(Car):
         throttle = float(dashboard["throttle"])
         brake = float(dashboard["brakes"])
         speed = float(dashboard["speed"])
-        img = ImageProcessor.bgr2rgb(np.asarray(Image.open(BytesIO(base64.b64decode(dashboard["image"])))))
+        img = cv2.imdecode(np.fromstring(base64.b64decode(dashboard["image"]), np.uint8), cv2.COLOR_BGR2RGB)
         del dashboard["image"]
         logger.debug("%s %s" % (str(datetime.now()), dashboard))
         total_time = float(dashboard["time"])

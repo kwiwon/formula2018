@@ -1182,8 +1182,9 @@ class PIDCar(Car):
         last_steering_angle = np.pi / 2 - float(dashboard["steering_angle"]) / 180.0 * np.pi  # steel wheel angle
         throttle = float(dashboard["throttle"])  # speed control
         speed = float(dashboard["speed"])  # current speed
-        img = ImageProcessor.bgr2rgb(
-            np.asarray(Image.open(BytesIO(base64.b64decode(dashboard["image"])))))  # current image
+
+        # current image
+        img = cv2.imdecode(np.fromstring(base64.b64decode(dashboard["image"]), np.uint8), cv2.COLOR_BGR2RGB)
 
         total_time = dashboard["time"].split(":") if "time" in dashboard else []  # spend time
         seconds = float(total_time.pop()) if len(total_time) > 0 else 0.0
