@@ -10,13 +10,16 @@ RUN apt-get install -y python-opencv
 
 # cleanup 
 RUN apt-get clean
+
+# Create working directory
+RUN mkdir /app
+
+# install python packages
+COPY formula-trend/requirements.txt /app
+RUN pip install -r /app/requirements.txt
   
 # Copy the current directory contents into the container at /app
-RUN mkdir /app
 COPY formula-trend/ /app
-
-# install python packages 
-RUN pip install -r /app/requirements.txt
 
 # Set the working directory to /app
 WORKDIR /app
