@@ -25,7 +25,7 @@ class BeCar(Car):
         self.last_detected_sign = None
         self.acting_new_sign = None
         self.accumulated_acting_frames = 0
-        self.MAX_ACCUMULATED_ACTING_FRAMES = 10
+        self.MAX_ACCUMULATED_ACTING_FRAMES = 5
         if self.do_sign_detection:
             self._sign = identifyTrafficSign()
         else:
@@ -33,7 +33,7 @@ class BeCar(Car):
 
         self._turn_degree = np.nan
         self._turn_angle_left = -7.5
-        self._turn_angle_right = 7.5
+        self._turn_angle_right = 10.5
 
     @staticmethod
     def load_model(path):
@@ -92,6 +92,7 @@ class BeCar(Car):
         if traffic_sign:
             if self.last_detected_sign != traffic_sign:  # We detected a new sign
                 self.logit("New sign detected:", traffic_sign)
+                self.accumulated_acting_frames = 0
                 self.acting_new_sign = traffic_sign
                 self.last_detected_sign = traffic_sign
 
@@ -384,14 +385,14 @@ class BeCar(Car):
                         # new_steering_angle += -7.5
                 else:
                     # 如果牆壁不在右邊，採取動作
-                    if not (wall_degree < 90):
-                        self._turn_degree = self._turn_angle_right
+                    # if not (wall_degree < 90):
+                    self._turn_degree = self._turn_angle_right
                         # new_steering_angle += 7.5
                 new_throttle = 0.01
 
-                if not np.isnan(self._turn_degree):
-                    new_steering_angle += self._turn_degree
-                    self.logit('turn: {}'.format(new_steering_angle))
+            if not np.isnan(self._turn_degree):
+                new_steering_angle += self._turn_degree
+                self.logit('turn: {}'.format(new_steering_angle))
 
             self.last_steering_angle = new_steering_angle
 
