@@ -25,7 +25,7 @@ class BeCar(Car):
         self.last_detected_sign = None
         self.acting_new_sign = None
         self.accumulated_acting_frames = 0
-        self.MAX_ACCUMULATED_ACTING_FRAMES = 5
+        self.MAX_ACCUMULATED_ACTING_FRAMES = 10
         if self.do_sign_detection:
             self._sign = identifyTrafficSign()
         else:
@@ -346,7 +346,7 @@ class BeCar(Car):
             # 牆壁角度
             wall_angle = np.nan
             # 轉向角度
-            turn_angle = np.nan
+            self._turn_degree = np.nan
             if len(angles_wall) > 0:
                 # 找最近的牆壁角度
                 # 從遠到近，找到一個即可
