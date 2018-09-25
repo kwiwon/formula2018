@@ -389,9 +389,10 @@ class BeCar(Car):
                         # new_steering_angle += 7.5
                 new_throttle = 0.01
 
-            if not np.isnan(self._turn_degree):
-                new_steering_angle += self._turn_degree
-                self.logit('turn: {}'.format(new_steering_angle))
+                if not np.isnan(self._turn_degree):
+                    new_steering_angle += self._turn_degree
+                    self.logit('turn: {}'.format(new_steering_angle))
+
             self.last_steering_angle = new_steering_angle
 
         return new_steering_angle, new_throttle
