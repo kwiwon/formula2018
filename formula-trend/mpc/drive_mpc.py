@@ -73,14 +73,14 @@ else:
 class MPC(object):
     def __init__(self, lib_path, model_settings_path):
         self.mpc_lib = cdll.LoadLibrary(lib_path)
-        self.mpc_lib.ChangeSettings(c_char_p(model_settings_path))
+        self.mpc_lib.ChangeSettings(c_char_p(model_settings_path.encode('utf-8')))
 
     def run(self, ptsx, ptsy, v):
         telemetry = {"ptsx": ptsx, "ptsy": ptsy, "speed": v}
         logger.debug(telemetry)
         # self.mpc_lib.Predict.argtypes = [c_char_p]
         self.mpc_lib.Predict.restype = c_char_p
-        res = self.mpc_lib.Predict(c_char_p(json.dumps(telemetry)))
+        res = self.mpc_lib.Predict(c_char_p(json.dumps(telemetry).encode('utf-8')))
         logger.debug(res)
         return res
 
@@ -223,7 +223,7 @@ class ImageProcessor(object):
         return flattened
 
     @staticmethod
-    def _crop_image(img,ratio=0.55):
+    def _crop_image(img, ratio=0.55):
         bottom_half_ratios = (ratio, 1.0)
         bottom_half_slice = slice(*(int(x * img.shape[0]) for x in bottom_half_ratios))
         bottom_half = img[bottom_half_slice, :, :]
