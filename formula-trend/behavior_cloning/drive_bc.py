@@ -35,6 +35,12 @@ class BeCar(Car):
         self._turn_angle_left = -7.5
         self._turn_angle_right = 10.5
 
+        # Handle crash accident
+        self._crash = 0
+        self._record_images = []
+        self._recover_mode = 0
+        self._recover_steering = 0.0
+
     @staticmethod
     def load_model(path):
         with open(path, 'r') as jfile:
@@ -89,8 +95,8 @@ class BeCar(Car):
         # TODO: Navigate to correct track based on detected traffic sign
         traffic_sign = self._sign.detect(src_img)
         traffic_sign = None if traffic_sign == "None" else traffic_sign
-        if traffic_sign:
-            if self.last_detected_sign != traffic_sign:  # We detected a new sign
+        if not self.acting_new_sign and traffic_sign:
+            if self.last_detected_sign != traffic_sign and traffic_sign in ("ForkLeft", "ForkRight"):  # We detected a new sign
                 self.logit("New sign detected:", traffic_sign)
                 self.accumulated_acting_frames = 0
                 self.acting_new_sign = traffic_sign
@@ -108,9 +114,74 @@ class BeCar(Car):
 
         return self.acting_new_sign
 
+    def crash_detector(self, speed):
+        """
+        detect if a crash occurred
+        """
+        crash = False
+
+        # consider speed < 0.1 sort of crash
+        if speed < 0.1:
+            self._crash += 1
+        elif not self._recover_mode and speed >= 0.3:
+            self._crash = 0
+
+        # it can be 5 or even shorter, depending on your bot behavior
+        if self._crash >= 5:
+            crash = True
+
+        return crash
+
+    def record_image(self, src_img):
+        """
+        record last 100 images for replay. used to detect when a crash hit right wall or left wall
+        """
+        self._record_images.append(src_img)
+        self._record_images = self._record_images[-100:]
+
+    def crash_recover(self, src_img, speed):
+        """
+        decide recover steering angle and throttle based on the image replay
+        """
+        self._recover_mode = 1
+
+        # skip calculating recover steering angle if we already have it
+        if self._recover_steering == 0.0:
+            for i in range(1, len(self._record_images)):
+                # replay the recorded images backward. check if the car hit right wall or left wall
+                _, px = ImageProcessor.check_recovery_direction(self._record_images[-i])
+                # px > 165 means left wall. px < 155 means right wall
+                if px > 165:
+                    self._recover_steering = -40
+                    break
+                elif 0 < px < 155:
+                    self._recover_steering = 40
+                    break
+        # check if we should move forward or backward
+        move_forward, px = ImageProcessor.check_recovery_direction(src_img)
+        if move_forward:
+            # print("recovery end")
+            recover_steering = -self._recover_steering
+            recover_throttle = 0.2
+            self._recover_mode = 0
+            self._crash = 0
+            self._recover_steering = 0.0
+        else:
+            # print("recovering")
+            recover_steering = self._recover_steering
+            recover_throttle = -1
+
+        return recover_steering, recover_throttle
+
     # return 是否倒退, 角度
-    @staticmethod
-    def go_back(img_src, debug=False):
+    def go_back(self, img_src, speed, debug=False):
+
+        # Handle crash accident
+        crashed = self.crash_detector(speed)
+        if crashed:
+            back_steering_angle, back_throttle = self.crash_recover(img_src, speed)
+            return True, back_steering_angle, back_throttle
+
         # 30720 = 240*0.4*320
         __TOTAL_PIXEL = 30720
         # 20736 = __TOTAL_PIXEL * 0.8
@@ -176,6 +247,7 @@ class BeCar(Car):
 
         back_angle = 0
         is_goback = False
+        back_throttle = -1
         # 全部是牆壁
         if _wb_p >= __THRESHOLD_PIXEL_MAX or _wy_p >= __THRESHOLD_PIXEL_MAX:
             is_goback = True
@@ -201,7 +273,7 @@ class BeCar(Car):
             is_goback = True
             back_angle = -40
 
-        return is_goback, back_angle
+        return is_goback, back_angle, back_throttle
 
     def find_track_angles(self, img_src, near, med, far):
         img = img_src.copy()
@@ -321,15 +393,15 @@ class BeCar(Car):
         # The current throttle of the car
         # throttle = data["throttle"]
         # The current speed of the car
-        # speed = data["speed"]
+        speed = float(data["speed"])
         # The current image from the center camera of the car
         image_rgb = cv2.imdecode(np.fromstring(base64.b64decode(data["image"]), np.uint8), flags=cv2.IMREAD_COLOR)
         image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
 
-        is_goback, back_angle = self.go_back(image_rgb)
+        is_goback, back_angle, back_throttle = self.go_back(image_rgb, speed)
         if is_goback:
             # Handle car crash
-            new_steering_angle, new_throttle = back_angle, -1
+            new_steering_angle, new_throttle = back_angle, back_throttle
         else:
             detected_sign = None
             if self.do_sign_detection:
@@ -395,5 +467,7 @@ class BeCar(Car):
                 self.logit('turn: {}'.format(new_steering_angle))
 
             self.last_steering_angle = new_steering_angle
+
+        self.record_image(image_rgb)
 
         return new_steering_angle, new_throttle
