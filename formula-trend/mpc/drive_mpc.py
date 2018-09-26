@@ -437,7 +437,7 @@ class ImageProcessor(object):
                           b[horizon_line_y:horizon_line_y + slice_shift_unit, :])
             slice_images_pixels = sg.shape[0] * sg.shape[1]
             tracks = map(lambda x: len(x[x == 0]), [sr, sg, sb])  # r,g,b = (0,0,0)
-            tracks_seen = filter(lambda y: float(y) / slice_images_pixels < percentage_image_pixels, tracks)
+            tracks_seen = list(filter(lambda y: float(y) / slice_images_pixels < percentage_image_pixels, tracks))
             if debug and len(tracks_seen) != 0:
                 print(horizon_line_y)
                 print(tracks)
@@ -449,6 +449,7 @@ class ImageProcessor(object):
     @staticmethod
     def find_trajectory_line(img, trajectory, lines, base_x, base_y, max_trajectory,
                              min_horizon_line_y, debug=True):
+        if lines is None: return trajectory
         if max_trajectory == 0 or len(lines) <= 5: return trajectory
         vectors = []
         del_idx_list = []
@@ -472,7 +473,7 @@ class ImageProcessor(object):
         if len(vectors) == 0: return trajectory
 
         # the line of the shortest distance (and longer length will be the first choice)
-        vectors.sort(lambda a, b: cmp(a[0], b[0]))  # if a[0] != b[0] else -cmp(a[1], b[1]))
+        vectors.sort(key=lambda a: a[0])  # if a[0] != b[0] else -cmp(a[1], b[1]))
         best = vectors[0]
         best_distance, best_length, best_thetaA, best_thetaB, best_coord, idx = best
         if (len(trajectory) < 1
@@ -641,7 +642,8 @@ class ImageProcessor(object):
         trajectory = []
         trajectory = ImageProcessor.find_trajectory_line(img, trajectory, lines, camera_x, camera_y, 30,
                                           min_horizon_line_y, debug=True)
-        points = ImageProcessor.find_trajectory_points(img, trajectory, image_height, min_horizon_line_y, NUM_POINTS, debug=False)
+        points = ImageProcessor.find_trajectory_points(img, trajectory, image_height, min_horizon_line_y, NUM_POINTS,
+                                                       debug=False)
         return points
         # if len(points) <= 3:
         #     return ImageProcessor.cache_points
@@ -773,6 +775,7 @@ class AutoDrive(object):
             logger.debug("ref_points: %s " % ref_points)
 
         if not self.crashed:
+            # Predict next steering angle and throttle
             image_height = src_img.shape[0]
             image_width = src_img.shape[1]
             camera_point = (image_width / 2, 0)
@@ -792,7 +795,7 @@ class AutoDrive(object):
             if self.show_graph:
                 for i in range(len(ref_points)):
                     cv2.circle(src_img, ref_points[i], 5, (0, 0, 255))
-                    cv2.putText(src_img, str(mpc_ref_points[i]).decode(), ref_points[i], cv2.FONT_HERSHEY_COMPLEX, 0.3, 255)
+                    cv2.putText(src_img, str(mpc_ref_points[i]), ref_points[i], cv2.FONT_HERSHEY_COMPLEX, 0.3, 255)
                 mpc_x_list = result_dict['mpc_x']
                 mpc_y_list = result_dict['mpc_y']
                 for i in range(len(mpc_x_list)):
@@ -983,7 +986,7 @@ def get_model_path(root_dir):
         mpc_library_path = os.path.join(root_dir, "./libmpc_mac.so")
     else:
         mpc_library_path = None
-    mpc_settings_path = os.path.join(root_dir, "./mpc_config.json")
+    mpc_settings_path = os.path.join(root_dir, "./u-shape-1.2.json")
 
     return mpc_library_path, mpc_settings_path
 
