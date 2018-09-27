@@ -61,9 +61,9 @@ def main(argv):
         # Create MPC car
         car = MpcCar(driver=create_mpc_driver(lib_dir=path.join(getcwd(), "mpc")))
     elif bot_type == 'pid':
-        from pid.drive_pid import PIDCar, create_pid_driver
-        # Create PID car
-        car = PIDCar(driver=create_pid_driver(do_sign_detection=False))
+        from pid.formula_bot_w2_QT import PIDCar, create_pid_driver, AutoDrive
+        car = PIDCar(send_control)
+        drive = create_pid_driver(car)
     else:
         print('bot type should be in (bc, mpc, pid)')
         sys.exit()
