@@ -1,0 +1,6 @@
+model_checkpoint_path: "tsd_epoch_199.ckpt"
+all_model_checkpoint_paths: "tsd_epoch_195.ckpt"
+all_model_checkpoint_paths: "tsd_epoch_196.ckpt"
+all_model_checkpoint_paths: "tsd_epoch_197.ckpt"
+all_model_checkpoint_paths: "tsd_epoch_198.ckpt"
+all_model_checkpoint_paths: "tsd_epoch_199.ckpt"
