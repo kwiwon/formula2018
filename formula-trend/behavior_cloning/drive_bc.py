@@ -395,19 +395,19 @@ class BeCar(Car):
         # The current speed of the car
         speed = float(data["speed"])
         # The current image from the center camera of the car
-        image_rgb = cv2.imdecode(np.fromstring(base64.b64decode(data["image"]), np.uint8), flags=cv2.IMREAD_COLOR)
-        image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+        image_bgr = cv2.imdecode(np.fromstring(base64.b64decode(data["image"]), np.uint8), flags=cv2.IMREAD_COLOR)
+        image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
 
-        is_goback, back_angle, back_throttle = self.go_back(image_rgb, speed)
+        is_goback, back_angle, back_throttle = self.go_back(image_bgr, speed)
         if is_goback:
             # Handle car crash
             new_steering_angle, new_throttle = back_angle, back_throttle
         else:
             detected_sign = None
             if self.do_sign_detection:
-                detected_sign = self.get_detected_sign(image_rgb)
+                detected_sign = self.get_detected_sign(image_bgr)
 
-            img = img_pre_processing(image_bgr)
+            img = img_pre_processing(image_rgb)
             img_batch = img[None, :, :, :].astype('float')
 
             prediction = self.model.predict(img_batch, batch_size=1)
@@ -415,7 +415,7 @@ class BeCar(Car):
             new_steering_angle = prediction[0][0]
             new_throttle = prediction[0][1] - prediction[0][2]  # throttle - brake
 
-            angles_wall = self.find_wall(image_rgb)
+            angles_wall = self.find_wall(image_bgr)
             # 牆壁角度
             wall_angle = np.nan
             # 轉向角度
@@ -468,6 +468,6 @@ class BeCar(Car):
 
             self.last_steering_angle = new_steering_angle
 
-        self.record_image(image_rgb)
+        self.record_image(image_bgr)
 
         return new_steering_angle, new_throttle
