@@ -32,12 +32,12 @@ flags.DEFINE_integer('features_epochs', 1,
                      'The number of epochs when training features.')
 flags.DEFINE_integer('full_epochs', 10000,
                      'The number of epochs when end-to-end training.')
-flags.DEFINE_integer('batch_size', 64, 'The batch size.')
+flags.DEFINE_integer('batch_size', 32, 'The batch size.')
 flags.DEFINE_integer('samples_per_epoch', 2560,
                      'The number of samples per epoch.')
-flags.DEFINE_integer('img_h', 70, 'The image height.')
+flags.DEFINE_integer('img_h', 240, 'The image height.')
 #flags.DEFINE_integer('img_h', 100, 'The image height.')
-flags.DEFINE_integer('img_w', 200, 'The image width.')
+flags.DEFINE_integer('img_w', 320, 'The image width.')
 flags.DEFINE_integer('img_c', 3, 'The number of channels.')
 
 def del_all_flags(FLAGS):
@@ -49,15 +49,15 @@ def del_all_flags(FLAGS):
 
 def img_pre_processing(img, old = False):
 
-    if old:
-        # resize and cast to float
-        img = misc.imresize(
-            img, (150, FLAGS.img_w)).astype('float')
-    else:
-        # resize and cast to float
-        img = misc.imresize(
-            img, (110, FLAGS.img_w)).astype('float')
-        img = img[40:]
+    # if old:
+    #     # resize and cast to float
+    #     img = misc.imresize(
+    #         img, (150, FLAGS.img_w)).astype('float')
+    # else:
+    #     # resize and cast to float
+    #     img = misc.imresize(
+    #         img, (110, FLAGS.img_w)).astype('float')
+    #     img = img[40:]
 
     # normalize
     img /= 255.
@@ -81,15 +81,15 @@ def select_specific_set(iter_set):
         # extract the features and labels
         #  img_f = 'data' + row['img'].split('../..')[1]
         #  img_ = img_pre_processing(misc.imread(img_f))
-        img_= row['img']
-        img_ = img_pre_processing(img_)
+        img_ = row['img']
+        # img_ = img_pre_processing(img_)
         angle_ = row['angle']
         throttle_ = row['throttle']
         break_ = row['break']
 
         # flip 50% of the time
-        if np.random.choice([True, False]):
-            img_, angle_ = np.fliplr(img_), -angle_ + 0.
+        # if np.random.choice([True, False]):
+        #     img_, angle_ = np.fliplr(img_), -angle_ + 0.
 
             
         imgs.append(img_)
@@ -119,15 +119,15 @@ def main(_):
     # fix random seed for reproducibility
     np.random.seed(123)
 
-    record_folder = ["./drive/data/driving-records-20180906/Track5",                          
-                 "drive/data/driving-records-20180906/Track4",
-                 "drive/data/driving-records-20180906/Track3",
-                #  "drive/data/driving-records-20180906/Track2",
-                 "drive/data/driving-records-20180906/Track1"]
+    record_folder = ["./driving-records-20180906/Track5",
+                     "./driving-records-20180906/Track4",
+                     "./driving-records-20180906/Track3",
+                     "./driving-records-20180906/Track2",
+                     "./driving-records-20180906/Track1"]
     record_file_to_play = []
     lab_data = []
     for folder in record_folder:
-        files = glob.glob(os.path.join(folder, '*flip.json'))
+        files = glob.glob(os.path.join(folder, '*.json'))
         files = sorted(files)
         record_file_to_play.extend(files)
 
@@ -147,18 +147,22 @@ def main(_):
             throttle = record['curr_throttle']
             current_speed = record['curr_speed']
             blake =  0 if current_speed > last_speed else 1
-            row['img'], row['angle'], row['throttle'] = augment_image(img, steering_angle, throttle)
+            # row['img'], row['angle'], row['throttle'] = augment_image(img, steering_angle, throttle)
+            row['img'] = img
+            row['angle'] = steering_angle
+            row['throttle'] = throttle
             row['break'] = blake 
             row['speed'] = current_speed 
             row['time'] = record['time'] 
             row['lap'] = record_json['lap']
-    
+
+            lab_data.append(row)
             # 轉彎 與 小路判斷, 加重資料的比例
-            if np.abs(steering_angle) > 10 or color_percentage_y > 0.01:
-                cnt = 10
-                while cnt > 0:
-                    lab_data.append(row)
-                    cnt -= 1
+            # if np.abs(steering_angle) > 10 or color_percentage_y > 0.01:
+            #     cnt = 10
+            #     while cnt > 0:
+            #         lab_data.append(row)
+            #         cnt -= 1
 
     print("Got", len(lab_data), "samples for training")
     log_data = pd.DataFrame(lab_data)         
