@@ -27,6 +27,10 @@ import base64
 flags = tf.app.flags
 FLAGS = flags.FLAGS
 
+
+from tensorflow.python.client import device_lib
+print(device_lib.list_local_devices())
+
 # command line flags
 flags.DEFINE_integer('features_epochs', 1,
                      'The number of epochs when training features.')
@@ -60,10 +64,12 @@ def img_pre_processing(img, old = False):
     #     img = img[40:]
 
     # normalize
-    img /= 255.
-    img -= 0.5
-    img *= 2.
-    return img
+    #img /= 255.
+    #img -= 0.5
+    #img *= 2.
+
+    return cv2.normalize(img.astype('float'), None, -1.0, 1.0, cv2.NORM_MINMAX)
+    #return img
 
 def img_paths_to_img_array(image_paths):
     all_imgs = [misc.imread(imp) for imp in image_paths]
@@ -81,8 +87,11 @@ def select_specific_set(iter_set):
         # extract the features and labels
         #  img_f = 'data' + row['img'].split('../..')[1]
         #  img_ = img_pre_processing(misc.imread(img_f))
-        img_ = row['img']
-        # img_ = img_pre_processing(img_)
+        #img_ = row['img']
+        # img = cv2.imdecode(row['img'], flags=cv2.IMREAD_COLOR)
+        img = np.asarray(Image.open(
+                BytesIO(base64.b64decode(row["img"]))))
+        img_ = img_pre_processing(img)
         angle_ = row['angle']
         throttle_ = row['throttle']
         break_ = row['break']
@@ -138,18 +147,18 @@ def main(_):
         
         for record in record_json['records']:
             row = {}
-            img = np.asarray(Image.open(
-                BytesIO(base64.b64decode(record["image"]))))
-            image_rgb = cv2.imdecode(np.fromstring(base64.b64decode(record["image"]), np.uint8), flags=cv2.IMREAD_COLOR)
-            color_percentage_y = color_percentage(image_rgb)
+            #img = np.asarray(Image.open(
+            #    BytesIO(base64.b64decode(record["image"]))))
+            # image_rgb = cv2.imdecode(np.fromstring(base64.b64decode(record["image"]), np.uint8), flags=cv2.IMREAD_COLOR)
+            # color_percentage_y = color_percentage(image_rgb)
     
             steering_angle = record['curr_steering_angle']
             throttle = record['curr_throttle']
             current_speed = record['curr_speed']
             blake =  0 if current_speed > last_speed else 1
             # row['img'], row['angle'], row['throttle'] = augment_image(img, steering_angle, throttle)
-            row['img'] = img
-            row['angle'] = steering_angle
+            row['img'] = record["image"]
+            row['angle'] = steering_angle / 40.0
             row['throttle'] = throttle
             row['break'] = blake 
             row['speed'] = current_speed 
@@ -203,7 +212,7 @@ def main(_):
     print('Train fully-connected layers weights:')
     history = model.fit_generator(
         generate_batch(log_data),
-        samples_per_epoch=10000,
+        samples_per_epoch=1000,
         nb_epoch=FLAGS.features_epochs,
         verbose=1)
 
@@ -223,7 +232,7 @@ def main(_):
     opt = Adam(lr=1e-03, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.7)
     model.compile(optimizer=opt, loss='mse')
     early_stopping = EarlyStopping(monitor='val_loss',
-                                   patience=1,
+                                   patience=3,
                                    min_delta=0.00009)
 
     print('Train top 2 conv blocks and fully-connected layers:')
