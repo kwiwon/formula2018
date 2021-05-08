@@ -4,5 +4,5 @@ Keras==2.1.6
 Pillow==4.0.0
 tensorflow==1.10.0
 Flask-SocketIO==3.0.1
-eventlet==0.24.1
+eventlet==0.31.0
 opencv-python==3.4.2.17
