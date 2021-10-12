@@ -2,7 +2,7 @@ pillow
 eventlet
 flask-socketio==1.0b1
 numpy==1.14.5
-opencv-python==3.4.2.17
+opencv-python==4.2.0.32
 tensorflow==1.10.1
 keras==2.2.2
 pandas==0.23.4
