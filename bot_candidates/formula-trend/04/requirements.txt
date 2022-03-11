@@ -1,4 +1,4 @@
-Pillow==5.2.0
+Pillow==9.0.1
 Flask-SocketIO==3.0.1
 opencv-python==3.4.3.18
 eventlet==0.24.1
